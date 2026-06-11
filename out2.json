@@ -1,0 +1,122 @@
+[
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2026,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423803
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2025,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423801
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2025,
+        "valorComponente": 57,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423802
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2024,
+        "valorComponente": 62.7,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423800
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2024,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423799
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2023,
+        "valorComponente": 68.4,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423798
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2023,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423797
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2022,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423795
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2022,
+        "valorComponente": 68.4,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423796
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2021,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423793
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2021,
+        "valorComponente": 68.4,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423794
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2020,
+        "valorComponente": 68.4,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423792
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2020,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423791
+    },
+    {
+        "codigoComponente": "RECARGO",
+        "nombreComponente": "Recargo",
+        "anioFiscal": 2019,
+        "valorComponente": 34.2,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423790
+    },
+    {
+        "codigoComponente": "TASA",
+        "nombreComponente": "Tasa",
+        "anioFiscal": 2019,
+        "valorComponente": 38,
+        "valorPrescripcion": null,
+        "codigoConsultaComponente": 9120423789
+    }
+]

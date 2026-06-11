@@ -1,0 +1,86 @@
+{
+    "vehiculo": {
+        "placa": "PBR0055",
+        "marca": "MERCEDES BENZ",
+        "modelo": "250",
+        "anio": 1980,
+        "clase": "",
+        "cilindraje": 0,
+        "descripcion_completa": "MERCEDES BENZ 250 1980"
+    },
+    "valor_matricula": 1209.1799999999998,
+    "impuesto": 120.93,
+    "desglose_anual": [
+        {
+            "anio": 2026,
+            "subtotal_matricula": 101,
+            "rodaje": 10.1,
+            "anios_atraso": 0,
+            "mora": 0,
+            "valor": 10.1
+        },
+        {
+            "anio": 2025,
+            "subtotal_matricula": 158.05,
+            "rodaje": 15.81,
+            "anios_atraso": 1,
+            "mora": 1.58,
+            "valor": 17.39
+        },
+        {
+            "anio": 2024,
+            "subtotal_matricula": 163.98,
+            "rodaje": 16.4,
+            "anios_atraso": 2,
+            "mora": 3.28,
+            "valor": 19.68
+        },
+        {
+            "anio": 2023,
+            "subtotal_matricula": 169.96,
+            "rodaje": 17,
+            "anios_atraso": 3,
+            "mora": 5.1,
+            "valor": 22.1
+        },
+        {
+            "anio": 2022,
+            "subtotal_matricula": 170.2,
+            "rodaje": 17.02,
+            "anios_atraso": 4,
+            "mora": 6.81,
+            "valor": 23.83
+        },
+        {
+            "anio": 2021,
+            "subtotal_matricula": 170.39,
+            "rodaje": 17.04,
+            "anios_atraso": 5,
+            "mora": 8.52,
+            "valor": 25.56
+        },
+        {
+            "anio": 2020,
+            "subtotal_matricula": 167.4,
+            "rodaje": 16.74,
+            "anios_atraso": 6,
+            "mora": 10.04,
+            "valor": 26.78
+        },
+        {
+            "anio": 2019,
+            "subtotal_matricula": 108.2,
+            "rodaje": 10.82,
+            "anios_atraso": 7,
+            "mora": 7.57,
+            "valor": 18.39
+        }
+    ],
+    "totales": {
+        "total_rodaje": 120.93,
+        "total_mora": 42.9,
+        "total_a_pagar": 163.83
+    },
+    "total_a_pagar": 163.83,
+    "metodo_sri": "deuda"
+}

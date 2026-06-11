@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* GAD Institutional Colors */
+    --color-gad-blue: #002f65;
+    --color-gad-red: #970707;
+
+    /* Derived colors */
+    --color-gad-blue-light: #003d85;
+    --color-gad-blue-dark: #001f45;
+    --color-gad-red-light: #b30909;
+    --color-gad-red-dark: #750505;
+  }
+
+  body {
+    @apply text-gray-900;
+  }
+}
+
+@layer components {
+  /* Botón primario con colores GAD */
+  .btn {
+    @apply px-6 py-3 rounded-lg font-semibold transition-all duration-200 inline-block;
+  }
+
+  .btn-primary {
+    @apply bg-gradient-to-r from-[#002f65] to-[#003d85] text-white hover:from-[#003d85] hover:to-[#002f65] shadow-lg hover:shadow-xl;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
+  }
+
+  .btn-danger {
+    @apply bg-gradient-to-r from-[#970707] to-[#b30909] text-white hover:from-[#b30909] hover:to-[#970707] shadow-lg hover:shadow-xl;
+  }
+
+  /* Card con borde azul GAD */
+  .card {
+    @apply bg-white rounded-lg shadow-md p-6 border-t-4 border-[#002f65];
+  }
+
+  .card-highlight {
+    @apply bg-white rounded-lg shadow-lg p-6 border-l-4 border-[#970707];
+  }
+
+  /* Input moderno */
+  .input {
+    @apply w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#002f65] focus:border-transparent transition-all;
+  }
+
+  .input-error {
+    @apply border-red-500 focus:ring-red-500;
+  }
+
+  /* Banner con gradiente GAD */
+  .government-header {
+    @apply bg-gradient-to-r from-[#002f65] via-[#003d85] to-[#970707] text-white shadow-lg;
+  }
+
+  /* Badge de estado */
+  .badge-success {
+    @apply inline-block px-3 py-1 text-sm font-semibold rounded-full bg-green-100 text-green-800;
+  }
+
+  .badge-pending {
+    @apply inline-block px-3 py-1 text-sm font-semibold rounded-full bg-yellow-100 text-yellow-800;
+  }
+
+  .badge-danger {
+    @apply inline-block px-3 py-1 text-sm font-semibold rounded-full bg-red-100 text-red-800;
+  }
+}
+
+@layer utilities {
+  .text-gad-blue {
+    color: #002f65;
+  }
+
+  .text-gad-red {
+    color: #970707;
+  }
+
+  .bg-gad-blue {
+    background-color: #002f65;
+  }
+
+  .bg-gad-red {
+    background-color: #970707;
+  }
+
+  .gradient-gad {
+    background: linear-gradient(135deg, #002f65 0%, #003d85 50%, #970707 100%);
+  }
+}
