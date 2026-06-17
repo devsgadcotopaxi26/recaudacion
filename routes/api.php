@@ -35,6 +35,17 @@ Route::prefix('v1')->group(function () {
 
         // Registrar pago realizado por banco
         Route::post('/registrar-pago', [BancaController::class, 'registrarPago']);
+
+        // ─── NUEVOS: Verificación y Conciliación ─────────────────────
+        // Verificar estado de un pago específico (por referencia o placa+año)
+        Route::post('/verificar-pago', [BancaController::class, 'verificarPago']);
+
+        // Reporte de conciliación (pagos por entidad en rango de fechas)
+        Route::post('/reporte-conciliacion', [BancaController::class, 'reporteConciliacion']);
+
+        // ─── ADMIN: Reporte para el GAD ──────────────────────────────
+        // Reporte completo de todas las entidades (para conciliar desde el GAD)
+        Route::post('/admin/reporte-conciliacion', [BancaController::class, 'reporteAdminConciliacion']);
     });
 
     // Endpoint de simulación (solo en desarrollo)

@@ -14,6 +14,7 @@ class Pago extends Model
     protected $fillable = [
         'vehiculo_id',
         'placa',
+        'api_token_id', // ← NUEVO: entidad que registró el pago
         'monto_impuesto',
         'monto_total',
         'estado',
@@ -40,6 +41,22 @@ class Pago extends Model
     public function vehiculo(): BelongsTo
     {
         return $this->belongsTo(Vehiculo::class);
+    }
+
+    /**
+     * Relación con la entidad bancaria que registró el pago
+     */
+    public function entidadBancaria(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ApiToken::class, 'api_token_id', 'id');
+    }
+
+    /**
+     * Alias para consultas admin (whereHas)
+     */
+    public function apiToken(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ApiToken::class, 'api_token_id', 'id');
     }
 
     /**
@@ -74,19 +91,10 @@ class Pago extends Model
             $fecha = date('Y-m-d');
             $monto = floatval($this->monto_total);
 
-            // Incrementar monto total recaudado
             \Illuminate\Support\Facades\Redis::incrbyfloat('stats:recaudacion:total', $monto);
-
-            // Incrementar monto recaudado del día
             \Illuminate\Support\Facades\Redis::incrbyfloat("stats:recaudacion:dia:{$fecha}", $monto);
-
-            // Incrementar contador de pagos completados del día
             \Illuminate\Support\Facades\Redis::incr("stats:pagos:completados:dia:{$fecha}");
-
-            // Incrementar contador total de pagos completados
             \Illuminate\Support\Facades\Redis::incr('stats:pagos:completados:total');
-
-            // Expirar contador del día después de 60 días
             \Illuminate\Support\Facades\Redis::expire("stats:recaudacion:dia:{$fecha}", 5184000);
             \Illuminate\Support\Facades\Redis::expire("stats:pagos:completados:dia:{$fecha}", 5184000);
         } catch (\Exception $e) {

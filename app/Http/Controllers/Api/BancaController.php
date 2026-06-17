@@ -8,13 +8,14 @@ use App\Models\Pago;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class BancaController extends Controller
 {
     /**
      * Consultar deuda de un vehículo por placa usando API del SRI
      * 
-     * POST /api/v1/consulta-deuda
+     * POST /api/v1/consulta-deuda-rodaje-bancos
      */
     public function consultarDeuda(Request $request)
     {
@@ -67,8 +68,6 @@ class BancaController extends Controller
 
             // Registrar la consulta en la base de datos
             // ── Guardia: no grabar si el resultado es incoherente (deuda con $0) ──
-            // Esto evita registros espurios de auditoría cuando el sistema está en
-            // un estado transitorio (SRI sin deuda pero historial aún no consultado).
             $metodoSri    = $datos['metodo_sri'] ?? 'desconocido';
             $totalAPagar  = $datos['totales']['total_a_pagar'] ?? 0;
             $esIncoherente = ($metodoSri === 'deuda' && $totalAPagar <= 0);
@@ -135,7 +134,6 @@ class BancaController extends Controller
             }
 
             $status = $e->getCode();
-            // Si el código no es un status HTTP válido, usar 500
             if ($status < 400 || $status > 599) {
                 $status = 500;
             }
@@ -143,7 +141,6 @@ class BancaController extends Controller
             $message = 'No se pudo consultar la información del vehículo';
             $error = $e->getMessage();
 
-            // Personalizar mensaje para errores 500 (errores internos o del sistema)
             if ($status >= 500) {
                 $message = 'Ocurrió un error interno al consultar la información';
                 if (!app()->environment('local')) {
@@ -230,7 +227,7 @@ class BancaController extends Controller
                 ], 400);
             }
 
-            // Crear registro de pago
+            // ── CAMBIO: ahora guardamos api_token_id para rastrear la entidad ──
             $pago = Pago::create([
                 'placa' => $placa,
                 'anio_fiscal' => $anioFiscal,
@@ -239,6 +236,7 @@ class BancaController extends Controller
                 'estado' => 'pagado',
                 'referencia_pago' => $request->referencia_externa,
                 'fecha_pago' => $request->fecha_pago,
+                'api_token_id' => $request->api_token_id, // ← NUEVO
                 'datos_adicionales' => [
                     'metodo_pago' => 'API_Bancaria',
                     'entidad_recaudadora' => $request->entidad_recaudadora,
@@ -251,7 +249,8 @@ class BancaController extends Controller
                 'placa' => $placa,
                 'monto' => $monto,
                 'entidad' => $request->entidad_recaudadora,
-                'referencia' => $request->referencia_externa
+                'referencia' => $request->referencia_externa,
+                'api_token_id' => $request->api_token_id, // ← NUEVO
             ]);
 
             return response()->json([
@@ -280,7 +279,6 @@ class BancaController extends Controller
             }
 
             $status = $e->getCode();
-            // Si el código no es un status HTTP válido, usar 500
             if ($status < 400 || $status > 599) {
                 $status = 500;
             }
@@ -288,7 +286,6 @@ class BancaController extends Controller
             $message = 'Error al registrar el pago';
             $error = $e->getMessage();
 
-            // Personalizar mensaje para errores 500 (errores internos o del sistema)
             if ($status >= 500) {
                 $message = 'Ocurrió un error inesperado al procesar el pago';
                 if (!app()->environment('local')) {
@@ -305,13 +302,207 @@ class BancaController extends Controller
     }
 
     /**
+     * Verificar el estado de un pago específico
+     * 
+     * La cooperativa puede consultar si un pago que registró
+     * efectivamente quedó guardado en el sistema.
+     * 
+     * POST /api/v1/verificar-pago
+     */
+    public function verificarPago(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'referencia_externa' => 'required_without:placa|string|max:100',
+            'placa' => 'required_without:referencia_externa|string|max:10',
+            'anio_fiscal' => 'nullable|integer|min:2020|max:2030',
+        ], [
+            'referencia_externa.required_without' => 'Debe enviar referencia_externa o placa',
+            'placa.required_without' => 'Debe enviar placa o referencia_externa',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos',
+                'errors' => $validator->errors()
+            ], 400);
+        }
+
+        try {
+            $query = Pago::query();
+
+            // Buscar por referencia externa (prioridad)
+            if ($request->filled('referencia_externa')) {
+                $query->where('referencia_pago', $request->referencia_externa);
+            } else {
+                // Buscar por placa + año fiscal
+                $query->where('placa', strtoupper($request->placa));
+                $anio = $request->anio_fiscal ?? date('Y');
+                $query->where('anio_fiscal', $anio);
+            }
+
+            $pago = $query->first();
+
+            if (!$pago) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No se encontró ningún pago con los datos proporcionados',
+                ], 404);
+            }
+
+            Log::info('API: Verificación de pago consultada', [
+                'pago_id' => $pago->id,
+                'entidad' => $request->entidad_nombre,
+                'api_token_id' => $request->api_token_id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pago encontrado',
+                'data' => [
+                    'pago_id' => $pago->id,
+                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
+                    'placa' => $pago->placa,
+                    'anio_fiscal' => $pago->anio_fiscal,
+                    'monto_impuesto' => round((float) $pago->monto_impuesto, 2),
+                    'monto_total' => round((float) $pago->monto_total, 2),
+                    'estado' => $pago->estado,
+                    'referencia_pago' => $pago->referencia_pago,
+                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
+                    'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
+                    'entidad_recaudadora' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+                ]
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('API: Error al verificar pago', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al consultar el pago',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
+            ], 500);
+        }
+    }
+
+    /**
+     * Reporte de conciliación para entidades bancarias
+     * 
+     * Devuelve los pagos registrados por la entidad autenticada
+     * en un rango de fechas, con totales para cuadrar caja.
+     * 
+     * POST /api/v1/reporte-conciliacion
+     */
+    public function reporteConciliacion(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'fecha_desde' => 'required|date|date_format:Y-m-d',
+            'fecha_hasta' => 'required|date|date_format:Y-m-d|after_or_equal:fecha_desde',
+        ], [
+            'fecha_desde.required' => 'La fecha de inicio es obligatoria',
+            'fecha_desde.date_format' => 'Formato: YYYY-MM-DD',
+            'fecha_hasta.required' => 'La fecha de fin es obligatoria',
+            'fecha_hasta.date_format' => 'Formato: YYYY-MM-DD',
+            'fecha_hasta.after_or_equal' => 'La fecha fin debe ser igual o posterior a la fecha inicio',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos',
+                'errors' => $validator->errors()
+            ], 400);
+        }
+
+        try {
+            $desde = $request->fecha_desde . ' 00:00:00';
+            $hasta = $request->fecha_hasta . ' 23:59:59';
+            $apiTokenId = $request->api_token_id;
+
+            // Consultar pagos de ESTA entidad en el rango de fechas
+            // Busca por api_token_id (nuevo) O por entidad_recaudadora en JSON (retrocompatibilidad)
+            $pagos = Pago::where(function ($q) use ($apiTokenId, $request) {
+                    $q->where('api_token_id', $apiTokenId)
+                      ->orWhere('datos_adicionales->entidad_recaudadora', $request->entidad_nombre);
+                })
+                ->whereBetween('created_at', [$desde, $hasta])
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            // Calcular totales
+            $pagados = $pagos->where('estado', 'pagado');
+            $pendientes = $pagos->where('estado', 'pendiente');
+            $fallidos = $pagos->where('estado', 'fallido');
+
+            // Detalle de cada pago
+            $detalle = $pagos->map(function ($pago) {
+                return [
+                    'pago_id' => $pago->id,
+                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
+                    'placa' => $pago->placa,
+                    'anio_fiscal' => $pago->anio_fiscal,
+                    'monto_total' => round((float) $pago->monto_total, 2),
+                    'estado' => $pago->estado,
+                    'referencia_pago' => $pago->referencia_pago,
+                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
+                    'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
+                ];
+            });
+
+            Log::info('API: Reporte de conciliación generado', [
+                'entidad' => $request->entidad_nombre,
+                'api_token_id' => $apiTokenId,
+                'desde' => $request->fecha_desde,
+                'hasta' => $request->fecha_hasta,
+                'total_registros' => $pagos->count(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reporte de conciliación generado',
+                'data' => [
+                    'entidad' => $request->entidad_nombre,
+                    'periodo' => [
+                        'desde' => $request->fecha_desde,
+                        'hasta' => $request->fecha_hasta,
+                    ],
+                    'resumen' => [
+                        'total_transacciones' => $pagos->count(),
+                        'pagados' => [
+                            'cantidad' => $pagados->count(),
+                            'monto_total' => round($pagados->sum('monto_total'), 2),
+                        ],
+                        'pendientes' => [
+                            'cantidad' => $pendientes->count(),
+                            'monto_total' => round($pendientes->sum('monto_total'), 2),
+                        ],
+                        'fallidos' => [
+                            'cantidad' => $fallidos->count(),
+                            'monto_total' => round($fallidos->sum('monto_total'), 2),
+                        ],
+                    ],
+                    'detalle_pagos' => $detalle,
+                ]
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('API: Error al generar reporte de conciliación', [
+                'error' => $e->getMessage(),
+                'entidad' => $request->entidad_nombre ?? 'desconocida',
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar el reporte',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
+            ], 500);
+        }
+    }
+
+    /**
      * Simulador de cálculo de rodaje y mora (solo para pruebas)
-     *
-     * Reglas de negocio aplicadas:
-     *  - Rodaje = 10% del subtotal por año (sin tope por año)
-     *  - Total rodaje (suma de todos los años) se ajusta: mín $10, máx $100
-     *  - El rodaje ajustado se distribuye proporcionalmente entre los años
-     *  - Mora por año = 10% del rodaje crudo × años de atraso (sin tope)
      *
      * POST /api/v1/test/simulacion
      */
@@ -336,12 +527,10 @@ class BancaController extends Controller
         $anioInicio = intval($request->anio_inicio);
         $totalFicticio = 0;
 
-        // Generar datos ficticios del SRI con la estructura real
         $detallesRubro = [];
         for ($anio = $anioInicio; $anio <= $anioActual; $anio++) {
             $totalFicticio += $valorAnual;
 
-            // Simular distribución base: 50% TASA SPPAT, 30% IMPUESTO, 20% TASA ANT
             $detallesRubro[] = [
                 'descripcion' => 'TASA',
                 'anio' => $anio,
@@ -358,7 +547,6 @@ class BancaController extends Controller
                 'valor' => round($valorAnual * 0.20, 4),
             ];
 
-            // RECARGO e INTERES para años atrasados (incluidos en el cálculo)
             if ($anio < $anioActual) {
                 $aniosAtraso = $anioActual - $anio;
                 $detallesRubro[] = [
@@ -372,7 +560,6 @@ class BancaController extends Controller
                     'valor' => round($valorAnual * 0.02 * $aniosAtraso, 2),
                 ];
 
-                // Simular PRESCRIPCION para deudas muy antiguas (ej: más de 5 años)
                 if ($aniosAtraso > 5) {
                     $detallesRubro[] = [
                         'descripcion' => 'PRESCRIPCION',
@@ -383,7 +570,6 @@ class BancaController extends Controller
             }
         }
 
-        // Construir estructura idéntica a la respuesta del SRI
         $detalleFicticio = [
             'placa' => 'TEST0001',
             'marca' => 'VEHICULO',
@@ -409,7 +595,6 @@ class BancaController extends Controller
             ],
         ];
 
-        // Calcular desglose usando la misma lógica real
         $sriService = new \App\Services\SriVehiculoService();
         $desglose = $sriService->calcularDesglosePorAnio($detalleFicticio);
 
@@ -431,5 +616,154 @@ class BancaController extends Controller
                 ],
             ],
         ], 200);
+    }
+
+    /**
+     * Reporte administrativo de conciliación para el GAD
+     *
+     * Permite ver TODOS los pagos registrados o filtrar por entidad.
+     * A diferencia de /reporte-conciliacion (que solo muestra los pagos
+     * de la entidad autenticada), este muestra todo para comparar.
+     *
+     * POST /api/v1/admin/reporte-conciliacion
+     */
+    public function reporteAdminConciliacion(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'fecha_desde' => 'required|date|date_format:Y-m-d',
+            'fecha_hasta' => 'required|date|date_format:Y-m-d|after_or_equal:fecha_desde',
+            'entidad' => 'nullable|string|max:100',
+            'estado' => 'nullable|in:pagado,pendiente,fallido,expirado',
+            'placa' => 'nullable|string|max:10',
+        ], [
+            'fecha_desde.required' => 'La fecha de inicio es obligatoria',
+            'fecha_desde.date_format' => 'Formato: YYYY-MM-DD',
+            'fecha_hasta.required' => 'La fecha de fin es obligatoria',
+            'fecha_hasta.date_format' => 'Formato: YYYY-MM-DD',
+            'fecha_hasta.after_or_equal' => 'La fecha fin debe ser igual o posterior a la fecha inicio',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos',
+                'errors' => $validator->errors()
+            ], 400);
+        }
+
+        try {
+            $desde = $request->fecha_desde . ' 00:00:00';
+            $hasta = $request->fecha_hasta . ' 23:59:59';
+
+            $query = Pago::whereBetween('created_at', [$desde, $hasta]);
+
+            // Filtro opcional por entidad
+            if ($request->filled('entidad')) {
+                $entidad = $request->entidad;
+                $query->where('datos_adicionales->entidad_recaudadora', 'like', "%{$entidad}%");
+            }
+
+            // Filtro opcional por estado
+            if ($request->filled('estado')) {
+                $query->where('estado', $request->estado);
+            }
+
+            // Filtro opcional por placa
+            if ($request->filled('placa')) {
+                $query->where('placa', strtoupper($request->placa));
+            }
+
+            $pagos = $query->orderBy('created_at', 'asc')->get();
+
+            // Totales generales
+            $pagados = $pagos->where('estado', 'pagado');
+            $pendientes = $pagos->where('estado', 'pendiente');
+            $fallidos = $pagos->where('estado', 'fallido');
+
+            // Agrupar por entidad para comparar
+            $porEntidad = $pagos->groupBy(function ($pago) {
+                return $pago->datos_adicionales['entidad_recaudadora'] ?? 'Sin entidad';
+            })->map(function ($pagosPorEntidad, $nombreEntidad) {
+                $pagadosEntidad = $pagosPorEntidad->where('estado', 'pagado');
+                return [
+                    'entidad' => $nombreEntidad,
+                    'total_transacciones' => $pagosPorEntidad->count(),
+                    'pagados' => $pagadosEntidad->count(),
+                    'monto_total_pagado' => round($pagadosEntidad->sum('monto_total'), 2),
+                    'pendientes' => $pagosPorEntidad->where('estado', 'pendiente')->count(),
+                    'fallidos' => $pagosPorEntidad->where('estado', 'fallido')->count(),
+                ];
+            })->values();
+
+            // Detalle de cada pago
+            $detalle = $pagos->map(function ($pago) {
+                return [
+                    'pago_id' => $pago->id,
+                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
+                    'placa' => $pago->placa,
+                    'anio_fiscal' => $pago->anio_fiscal,
+                    'monto_impuesto' => round((float) $pago->monto_impuesto, 2),
+                    'monto_total' => round((float) $pago->monto_total, 2),
+                    'estado' => $pago->estado,
+                    'referencia_pago' => $pago->referencia_pago,
+                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
+                    'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
+                    'entidad_recaudadora' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+                    'metodo_pago' => $pago->datos_adicionales['metodo_pago'] ?? null,
+                ];
+            });
+
+            Log::info('API: Reporte admin de conciliación generado', [
+                'solicitado_por' => $request->entidad_nombre,
+                'desde' => $request->fecha_desde,
+                'hasta' => $request->fecha_hasta,
+                'filtro_entidad' => $request->entidad,
+                'total_registros' => $pagos->count(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reporte administrativo de conciliación generado',
+                'data' => [
+                    'periodo' => [
+                        'desde' => $request->fecha_desde,
+                        'hasta' => $request->fecha_hasta,
+                    ],
+                    'filtros_aplicados' => [
+                        'entidad' => $request->entidad ?? 'Todas',
+                        'estado' => $request->estado ?? 'Todos',
+                        'placa' => $request->placa ?? null,
+                    ],
+                    'resumen_general' => [
+                        'total_transacciones' => $pagos->count(),
+                        'pagados' => [
+                            'cantidad' => $pagados->count(),
+                            'monto_total' => round($pagados->sum('monto_total'), 2),
+                        ],
+                        'pendientes' => [
+                            'cantidad' => $pendientes->count(),
+                            'monto_total' => round($pendientes->sum('monto_total'), 2),
+                        ],
+                        'fallidos' => [
+                            'cantidad' => $fallidos->count(),
+                            'monto_total' => round($fallidos->sum('monto_total'), 2),
+                        ],
+                    ],
+                    'resumen_por_entidad' => $porEntidad,
+                    'detalle_pagos' => $detalle,
+                ]
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('API: Error en reporte admin de conciliación', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar el reporte',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
+            ], 500);
+        }
     }
 }
