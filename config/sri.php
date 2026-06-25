@@ -33,6 +33,6 @@ return [
 
     'cache' => [
         'enabled' => env('SRI_CACHE_ENABLED', true),
-        'ttl' => env('SRI_CACHE_TTL', 3600), // 1 hora por defecto
+        'ttl' => env('SRI_CACHE_TTL', 86400), // 24 horas por defecto
     ],
 ];

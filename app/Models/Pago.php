@@ -14,7 +14,8 @@ class Pago extends Model
     protected $fillable = [
         'vehiculo_id',
         'placa',
-        'api_token_id', // ← NUEVO: entidad que registró el pago
+        'api_token_id', // ← entidad que registró el pago
+        'consulta_bancaria_id', // ← consulta que originó el pago
         'monto_impuesto',
         'monto_total',
         'estado',
@@ -57,6 +58,14 @@ class Pago extends Model
     public function apiToken(): BelongsTo
     {
         return $this->belongsTo(\App\Models\ApiToken::class, 'api_token_id', 'id');
+    }
+
+    /**
+     * Relación con la consulta que originó el pago
+     */
+    public function consultaBancaria(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ConsultaBancaria::class, 'consulta_bancaria_id', 'id');
     }
 
     /**
