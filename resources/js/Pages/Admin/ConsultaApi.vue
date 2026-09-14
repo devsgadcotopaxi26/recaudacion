@@ -232,40 +232,83 @@
             </div>
           </div>
 
+          <!-- Aviso: todos los años pagados según la BD local -->
+          <div
+            v-if="resultado.todos_pagados"
+            class="bg-green-50 border-2 border-green-500 rounded-2xl p-4 flex items-center gap-3"
+          >
+            <svg
+              class="w-6 h-6 text-green-600 flex-shrink-0"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <p class="text-green-800 font-semibold">
+              Todos los años están pagados según los registros locales. No hay
+              deuda pendiente.
+            </p>
+          </div>
+
           <!-- Totales -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div
               class="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-6 text-white shadow-lg"
             >
-              <p class="text-blue-100 text-sm font-medium mb-1">Total Rodaje</p>
+              <p class="text-blue-100 text-sm font-medium mb-1">
+                Rodaje Calculado
+              </p>
               <p class="text-3xl font-bold">
-                ${{ formatMoney(resultado.totales.total_rodaje) }}
+                ${{ formatMoney(resultado.totales_brutos.total_rodaje) }}
               </p>
               <p class="text-blue-200 text-xs mt-2">
-                Impuesto de rodaje acumulado
+                Según información del SRI (bruto, sin descontar pagos)
               </p>
             </div>
             <div
               class="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 text-white shadow-lg"
             >
-              <p class="text-orange-100 text-sm font-medium mb-1">Total Mora</p>
+              <p class="text-orange-100 text-sm font-medium mb-1">
+                Mora Calculada
+              </p>
               <p class="text-3xl font-bold">
-                ${{ formatMoney(resultado.totales.total_mora) }}
+                ${{ formatMoney(resultado.totales_brutos.total_mora) }}
               </p>
               <p class="text-orange-200 text-xs mt-2">
-                Intereses y recargos por mora
+                Según información del SRI (bruto, sin descontar pagos)
               </p>
             </div>
             <div
-              class="bg-gradient-to-br from-green-600 to-emerald-600 rounded-2xl p-6 text-white shadow-lg"
+              class="rounded-2xl p-6 text-white shadow-lg"
+              :class="
+                resultado.todos_pagados
+                  ? 'bg-gradient-to-br from-green-600 to-emerald-600'
+                  : 'bg-gradient-to-br from-red-600 to-rose-600'
+              "
             >
-              <p class="text-green-100 text-sm font-medium mb-1">
-                Total a Pagar
+              <p class="text-white/80 text-sm font-medium mb-1">
+                Total Pendiente
               </p>
               <p class="text-3xl font-bold">
-                ${{ formatMoney(resultado.totales.total_a_pagar) }}
+                ${{ formatMoney(resultado.totales_pendientes.total_a_pagar) }}
               </p>
-              <p class="text-green-200 text-xs mt-2">Monto total a recaudar</p>
+              <p class="text-white/70 text-xs mt-2">
+                Ya descontando pagos registrados localmente
+                <template
+                  v-if="
+                    resultado.totales_pendientes.total_a_pagar !==
+                    resultado.totales_brutos.total_a_pagar
+                  "
+                >
+                  (bruto SRI: ${{
+                    formatMoney(resultado.totales_brutos.total_a_pagar)
+                  }})
+                </template>
+              </p>
             </div>
           </div>
 
@@ -324,8 +367,10 @@
                     <th class="px-6 py-3 text-left">Año</th>
                     <th class="px-6 py-3 text-right">Rodaje</th>
                     <th class="px-6 py-3 text-right">Mora</th>
-                    <th class="px-6 py-3 text-right">Subtotal</th>
+                    <th class="px-6 py-3 text-right">Subtotal (bruto)</th>
                     <th class="px-6 py-3 text-center">Estado</th>
+                    <th class="px-6 py-3 text-right">Pendiente</th>
+                    <th class="px-6 py-3 text-left">Comprobante</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
@@ -354,6 +399,12 @@
                       >
                         ${{ formatMoney(item.mora) }}
                       </span>
+                      <span
+                        v-if="item.mora > 0"
+                        class="ml-1 inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700 align-middle"
+                      >
+                        CON MORA
+                      </span>
                     </td>
                     <td class="px-6 py-4 text-right">
                       <span class="font-bold text-gray-900"
@@ -366,13 +417,48 @@
                       <span
                         class="px-3 py-1 rounded-full text-xs font-semibold"
                         :class="
-                          item.mora > 0
-                            ? 'bg-orange-100 text-orange-700'
-                            : 'bg-green-100 text-green-700'
+                          item.estado === 'pagado'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-amber-100 text-amber-700'
                         "
                       >
-                        {{ item.mora > 0 ? "Con mora" : "Al día" }}
+                        {{ item.estado === "pagado" ? "PAGADO" : "PENDIENTE" }}
                       </span>
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                      <span
+                        class="font-bold"
+                        :class="
+                          item.estado === 'pagado'
+                            ? 'text-green-600'
+                            : 'text-gray-900'
+                        "
+                      >
+                        ${{
+                          formatMoney(
+                            item.estado === "pagado"
+                              ? 0
+                              : (item.rodaje || 0) + (item.mora || 0),
+                          )
+                        }}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 text-left text-xs">
+                      <template v-if="item.pago">
+                        <p class="font-semibold text-gray-800">
+                          {{ item.pago.comprobante }}
+                        </p>
+                        <p class="text-gray-500">
+                          Ref: {{ item.pago.referencia }}
+                        </p>
+                        <p v-if="item.pago.entidad" class="text-gray-500">
+                          {{ item.pago.entidad }}
+                        </p>
+                        <p v-if="item.pago.fecha_pago" class="text-gray-400">
+                          {{ item.pago.fecha_pago }}
+                        </p>
+                      </template>
+                      <span v-else class="text-gray-400">—</span>
                     </td>
                   </tr>
                 </tbody>
@@ -381,13 +467,21 @@
                   <tr>
                     <td class="px-6 py-4 font-bold">TOTAL</td>
                     <td class="px-6 py-4 text-right font-bold">
-                      ${{ formatMoney(resultado.totales.total_rodaje) }}
+                      ${{ formatMoney(resultado.totales_brutos.total_rodaje) }}
                     </td>
                     <td class="px-6 py-4 text-right font-bold">
-                      ${{ formatMoney(resultado.totales.total_mora) }}
+                      ${{ formatMoney(resultado.totales_brutos.total_mora) }}
                     </td>
+                    <td class="px-6 py-4 text-right font-bold">
+                      ${{
+                        formatMoney(resultado.totales_brutos.total_a_pagar)
+                      }}
+                    </td>
+                    <td></td>
                     <td class="px-6 py-4 text-right font-bold text-green-400">
-                      ${{ formatMoney(resultado.totales.total_a_pagar) }}
+                      ${{
+                        formatMoney(resultado.totales_pendientes.total_a_pagar)
+                      }}
                     </td>
                     <td></td>
                   </tr>
@@ -486,8 +580,10 @@ const jsonFormateado = computed(() => {
         placa: resultado.value.placa,
         vehiculo: resultado.value.vehiculo,
         valor_matricula: resultado.value.valor_matricula,
+        todos_pagados: resultado.value.todos_pagados,
         desglose_anual: resultado.value.desglose_anual,
-        totales: resultado.value.totales,
+        totales_brutos: resultado.value.totales_brutos,
+        totales_pendientes: resultado.value.totales_pendientes,
       },
     },
     null,

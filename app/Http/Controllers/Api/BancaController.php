@@ -45,37 +45,16 @@ class BancaController extends Controller
             $sriService = new \App\Services\SriVehiculoService();
             $datos = $sriService->consultarVehiculoCompleto($placa);
 
-            // Obtener TODOS los pagos existentes de esta placa
-            $pagosExistentes = Pago::where('placa', $placa)
-                ->where('estado', 'pagado')
-                ->get()
-                ->keyBy('anio_fiscal');
-
-            // Marcar cada año del desglose como pagado o pendiente
-            $desgloseConEstado = collect($datos['desglose_anual'])->map(function ($anio) use ($pagosExistentes) {
-                $pago = $pagosExistentes->get($anio['anio']);
-                $anio['estado'] = $pago ? 'pagado' : 'pendiente';
-                if ($pago) {
-                    $anio['pago'] = [
-                        'pago_id' => $pago->id,
-                        'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                        'codigo_consulta' => $pago->datos_adicionales['codigo_consulta'] ?? null,
-                        'referencia' => $pago->referencia_pago,
-                        'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
-                        'entidad' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
-                    ];
-                }
-                return $anio;
-            })->toArray();
-
-            // Calcular totales solo de años pendientes
-            $aniosPendientes = collect($desgloseConEstado)->where('estado', 'pendiente');
-            $totalPendiente = round($aniosPendientes->sum('valor'), 2);
-            $totalRodajePendiente = round($aniosPendientes->sum('rodaje'), 2);
-            $totalMoraPendiente = round($aniosPendientes->sum('mora'), 2);
-
-            // Si todo está pagado, informar
-            $todosPagados = $aniosPendientes->isEmpty();
+            // Conciliar el desglose del SRI contra los pagos registrados localmente.
+            // Lógica compartida con el panel admin (/admin/consulta-api) vía
+            // SriVehiculoService::conciliarPagosLocales() — una sola implementación
+            // de la regla "deuda pendiente = SRI menos pagos locales pagados".
+            $conciliacion = $sriService->conciliarPagosLocales($placa, $datos['desglose_anual']);
+            $desgloseConEstado = $conciliacion['desglose_anual'];
+            $todosPagados = $conciliacion['todos_pagados'];
+            $totalRodajePendiente = $conciliacion['totales_pendientes']['total_rodaje'];
+            $totalMoraPendiente = $conciliacion['totales_pendientes']['total_mora'];
+            $totalPendiente = $conciliacion['totales_pendientes']['total_a_pagar'];
 
             $vehiculo = $datos['vehiculo'];
 
@@ -231,13 +210,17 @@ class BancaController extends Controller
                     ->first();
 
                 if ($pagoExistente) {
+                    $codigoConsultaExistente = $pagoExistente->datos_adicionales['codigo_consulta'] ?? null;
                     return response()->json([
                         'success' => false,
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
                         'pago_existente' => [
                             'id' => $pagoExistente->id,
                             'comprobante' => 'PAG-' . str_pad($pagoExistente->id, 6, '0', STR_PAD_LEFT),
-                            'codigo_consulta' => $pagoExistente->datos_adicionales['codigo_consulta'] ?? null,
+                            'codigo_consulta' => $codigoConsultaExistente,
+                            // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
+                            // no es un dato corrupto ni faltante).
+                            'registro_historico' => is_null($codigoConsultaExistente),
                             'fecha_pago' => $pagoExistente->fecha_pago,
                             'referencia' => $pagoExistente->referencia_pago,
                             'monto' => $pagoExistente->monto_total
@@ -351,7 +334,10 @@ class BancaController extends Controller
                     'datos_adicionales' => [
                         'metodo_pago' => 'API_Bancaria',
                         'entidad_recaudadora' => $request->entidad_recaudadora,
-                        'codigo_consulta' => $request->codigo_consulta,
+                        // Fuente de verdad: el código de la ConsultaBancaria ya validada
+                        // ($consulta), no el dato libre del request (aunque en este punto
+                        // ya coinciden, por diseño, ya que $consulta se buscó por ese valor).
+                        'codigo_consulta' => $consulta->codigo_consulta,
                         'vehiculo' => $datos['vehiculo']
                     ],
                 ]);
@@ -377,7 +363,7 @@ class BancaController extends Controller
                 'anios_pagados' => $aniosAPagar->pluck('anio')->toArray(),
                 'entidad' => $request->entidad_recaudadora,
                 'referencia' => $request->referencia_externa,
-                'codigo_consulta' => $request->codigo_consulta,
+                'codigo_consulta' => $consulta->codigo_consulta,
                 'api_token_id' => $request->api_token_id,
             ]);
 
@@ -385,7 +371,7 @@ class BancaController extends Controller
                 'success' => true,
                 'message' => 'Pago registrado exitosamente',
                 'data' => [
-                    'codigo_consulta' => $request->codigo_consulta,
+                    'codigo_consulta' => $consulta->codigo_consulta,
                     'placa' => $placa,
                     'monto_total_pagado' => round($monto, 2),
                     'anios_pagados' => count($pagosCreados),
@@ -495,13 +481,17 @@ class BancaController extends Controller
                 'api_token_id' => $request->api_token_id,
             ]);
 
+            $codigoConsultaPago = $pago->datos_adicionales['codigo_consulta'] ?? null;
+
             return response()->json([
                 'success' => true,
                 'message' => 'Pago encontrado',
                 'data' => [
                     'pago_id' => $pago->id,
                     'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'codigo_consulta' => $pago->datos_adicionales['codigo_consulta'] ?? null,
+                    'codigo_consulta' => $codigoConsultaPago,
+                    // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
+                    'registro_historico' => is_null($codigoConsultaPago),
                     'placa' => $pago->placa,
                     'anio_fiscal' => $pago->anio_fiscal,
                     'monto_impuesto' => round((float) $pago->monto_impuesto, 2),

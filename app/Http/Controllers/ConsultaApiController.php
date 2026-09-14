@@ -38,9 +38,15 @@ class ConsultaApiController extends Controller
             $sriService = new SriVehiculoService();
             $datos      = $sriService->consultarVehiculoCompleto($placa);
 
+            // Conciliar el desglose bruto del SRI contra los pagos registrados
+            // localmente (misma lógica que usa la API bancaria en
+            // BancaController@consultarDeuda, vía SriVehiculoService::conciliarPagosLocales).
+            $conciliacion = $sriService->conciliarPagosLocales($placa, $datos['desglose_anual']);
+
             Log::info('Admin/ConsultaApi: Consulta exitosa', [
                 'placa' => $placa,
                 'user'  => auth()->user()->email,
+                'todos_pagados' => $conciliacion['todos_pagados'],
             ]);
 
             return back()->with('resultado', [
@@ -53,11 +59,18 @@ class ConsultaApiController extends Controller
                     'tipo'        => $datos['vehiculo']['clase'] ?? 'AUTOMÓVIL',
                     'descripcion' => $datos['vehiculo']['descripcion_completa'] ?? '',
                 ],
-                'valor_matricula' => $datos['valor_matricula'],
-                'desglose_anual'  => $datos['desglose_anual'],
-                'totales'         => $datos['totales'],
-                'metodo_sri'      => $datos['metodo_sri'] ?? 'deuda',
-                'pago_previo'     => null,
+                'valor_matricula'    => $datos['valor_matricula'],
+                // Desglose ya conciliado: cada año trae 'estado' (pagado|pendiente)
+                // y, si corresponde, el sub-objeto 'pago' con comprobante/referencia/entidad.
+                'desglose_anual'     => $conciliacion['desglose_anual'],
+                'todos_pagados'      => $conciliacion['todos_pagados'],
+                // Bruto: lo que calcula el sistema a partir de la matrícula del SRI,
+                // SIN descontar pagos locales. Solo para fines informativos/auditoría.
+                'totales_brutos'     => $datos['totales'],
+                // Neto: lo que realmente falta por pagar según la BD local.
+                // Este es el valor que debe usarse para decidir si hay deuda.
+                'totales_pendientes' => $conciliacion['totales_pendientes'],
+                'metodo_sri'         => $datos['metodo_sri'] ?? 'deuda',
             ]);
 
         } catch (\Throwable $e) {
