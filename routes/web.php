@@ -5,6 +5,7 @@ use App\Http\Controllers\ConsultaApiController;
 use App\Http\Controllers\EstadisticasController;
 use App\Http\Controllers\PagoController;
 use App\Http\Controllers\PagoVerificacionController;
+use App\Http\Controllers\ReporteConciliacionController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\VehiculoController;
 use App\Http\Controllers\WebhookController;
@@ -94,6 +95,10 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         // Consulta visual de API (mismos datos que el endpoint bancario)
         Route::get('/consulta-api', [ConsultaApiController::class, 'index'])->name('consulta-api.index');
         Route::post('/consulta-api', [ConsultaApiController::class, 'consultar'])->name('consulta-api.consultar');
+
+        // Reporte de Conciliación (pagos registrados, filtros y totales)
+        Route::get('/reporte-conciliacion', [ReporteConciliacionController::class, 'index'])->name('reporte-conciliacion.index');
+        Route::post('/reporte-conciliacion', [ReporteConciliacionController::class, 'consultar'])->name('reporte-conciliacion.consultar');
     });
 
     // Rutas solo para admin - Gestión de usuarios

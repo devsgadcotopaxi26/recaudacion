@@ -2,62 +2,64 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ConciliacionReporteService;
+use App\Services\ConsultaEstadisticasService;
 use Illuminate\Support\Facades\Redis;
 use Inertia\Inertia;
 
 class EstadisticasController extends Controller
 {
+    public function __construct(
+        private ConciliacionReporteService $conciliacionService,
+        private ConsultaEstadisticasService $consultaService
+    ) {
+    }
+
     /**
-     * Mostrar panel de estadísticas
+     * Mostrar panel de estadísticas.
+     *
+     * Recaudación y Consultas de Vehículos se calculan en tiempo real desde
+     * las tablas reales (`pagos` y `consulta_bancarias`), reutilizando
+     * ConciliacionReporteService (la misma lógica que ya usa el Reporte de
+     * Conciliación) y el nuevo ConsultaEstadisticasService. Ya no dependen
+     * de los contadores `stats:*` de Redis, que solo se incrementaban desde
+     * el flujo ciudadano (VehiculoController / Pago::marcarComoPagado), un
+     * canal que en la práctica no genera los datos reales de este sistema
+     * (todo se creó vía la API bancaria). Esas llamadas a Redis se dejan
+     * intactas en su código original por si ese flujo llega a usarse.
      */
     public function index()
     {
-        $fecha = date('Y-m-d');
-        $hora = date('Y-m-d:H');
+        $hoy = date('Y-m-d');
 
-        // Obtener estadísticas básicas de consultas
-        $consultasTotal = (int) Redis::get('stats:consultas:total') ?? 0;
-        $consultasHoy = (int) Redis::get("stats:consultas:dia:{$fecha}") ?? 0;
-        $consultasEstaHora = (int) Redis::get("stats:consultas:hora:{$hora}") ?? 0;
+        // ── Recaudación (tiempo real, vía ConciliacionReporteService) ──────
+        $pagosHoy = $this->conciliacionService
+            ->construirQuery(['fecha_desde' => $hoy, 'fecha_hasta' => $hoy])
+            ->get();
+        $resumenHoy = $this->conciliacionService->resumenGeneral($pagosHoy);
 
-        // Top 10 placas más consultadas
-        $placasPopulares = Redis::zrevrange('stats:placas:populares', 0, 9, 'WITHSCORES');
-        $topPlacas = [];
+        $todosLosPagos = $this->conciliacionService->construirQuery([])->get();
+        $resumenTotal = $this->conciliacionService->resumenGeneral($todosLosPagos);
 
-        for ($i = 0; $i < count($placasPopulares); $i += 2) {
-            if (isset($placasPopulares[$i]) && isset($placasPopulares[$i + 1])) {
-                $topPlacas[] = [
-                    'placa' => $placasPopulares[$i],
-                    'consultas' => (int) $placasPopulares[$i + 1]
-                ];
-            }
-        }
+        $recaudacionTotal = $resumenTotal['pagados']['monto_total'];
+        $pagosCompletadosTotal = $resumenTotal['pagados']['cantidad'];
+        $recaudacionHoy = $resumenHoy['pagados']['monto_total'];
+        $pagosCompletadosHoy = $resumenHoy['pagados']['cantidad'];
 
-        // Consultas por hora (últimas 24 horas)
-        $consultasPorHora = [];
-        for ($i = 23; $i >= 0; $i--) {
-            $horaCalculo = date('Y-m-d:H', strtotime("-{$i} hours"));
-            $consultas = (int) Redis::get("stats:consultas:hora:{$horaCalculo}") ?? 0;
-            $consultasPorHora[] = [
-                'hora' => date('H:00', strtotime("-{$i} hours")),
-                'fecha_hora' => $horaCalculo,
-                'consultas' => $consultas
-            ];
-        }
+        $promedioMontoPago = $pagosCompletadosTotal > 0
+            ? round($recaudacionTotal / $pagosCompletadosTotal, 2)
+            : 0;
 
-        // Consultas por día (últimos 7 días)
-        $consultasPorDia = [];
-        for ($i = 6; $i >= 0; $i--) {
-            $diaCalculo = date('Y-m-d', strtotime("-{$i} days"));
-            $consultas = (int) Redis::get("stats:consultas:dia:{$diaCalculo}") ?? 0;
-            $consultasPorDia[] = [
-                'fecha' => $diaCalculo,
-                'fecha_formateada' => date('d/m', strtotime($diaCalculo)),
-                'consultas' => $consultas
-            ];
-        }
+        $recaudacionPorDia = $this->conciliacionService->recaudacionPorDia(7);
 
-        // Información de Redis
+        // ── Consultas de vehículos (tiempo real, vía ConsultaEstadisticasService) ──
+        $consultas = $this->consultaService->totales();
+        $topPlacas = $this->consultaService->topPlacas(10);
+        $consultasPorDia = $this->consultaService->porDia(7);
+        $consultasPorHora = $this->consultaService->porHora(24);
+
+        // Información de Redis (sigue siendo real: uso de caché/sesiones/colas,
+        // no relacionado con las estadísticas de arriba)
         try {
             $info = Redis::connection()->client()->info();
             $memoryUsed = $info['Memory']['used_memory_human'] ?? 'N/A';
@@ -67,34 +69,11 @@ class EstadisticasController extends Controller
 
         $totalKeys = Redis::dbsize();
 
-        // Estadísticas de recaudación
-        $recaudacionTotal = (float) Redis::get('stats:recaudacion:total') ?? 0;
-        $recaudacionHoy = (float) Redis::get("stats:recaudacion:dia:{$fecha}") ?? 0;
-        $pagosCompletadosHoy = (int) Redis::get("stats:pagos:completados:dia:{$fecha}") ?? 0;
-        $pagosCompletadosTotal = (int) Redis::get('stats:pagos:completados:total') ?? 0;
-
-        // Calcular promedio
-        $promedioMontoPago = $pagosCompletadosTotal > 0
-            ? round($recaudacionTotal / $pagosCompletadosTotal, 2)
-            : 0;
-
-        // Recaudación por día (últimos 7 días)
-        $recaudacionPorDia = [];
-        for ($i = 6; $i >= 0; $i--) {
-            $diaCalculo = date('Y-m-d', strtotime("-{$i} days"));
-            $monto = (float) Redis::get("stats:recaudacion:dia:{$diaCalculo}") ?? 0;
-            $recaudacionPorDia[] = [
-                'fecha' => $diaCalculo,
-                'fecha_formateada' => date('d/m', strtotime($diaCalculo)),
-                'monto' => $monto
-            ];
-        }
-
         return Inertia::render('Dashboard/Estadisticas', [
             'estadisticas' => [
-                'consultas_total' => $consultasTotal,
-                'consultas_hoy' => $consultasHoy,
-                'consultas_esta_hora' => $consultasEstaHora,
+                'consultas_total' => $consultas['total'],
+                'consultas_hoy' => $consultas['hoy'],
+                'consultas_esta_hora' => $consultas['esta_hora'],
                 'top_placas' => $topPlacas,
                 'consultas_por_hora' => $consultasPorHora,
                 'consultas_por_dia' => $consultasPorDia,

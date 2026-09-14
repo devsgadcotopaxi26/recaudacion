@@ -202,6 +202,37 @@
             Consultar Valores
           </Link>
 
+          <!-- Reporte de Conciliación - Admin y verificacionpagos -->
+          <Link
+            href="/admin/reporte-conciliacion"
+            class="flex items-center px-4 py-3 mb-2 text-gray-700 rounded-lg transition duration-200"
+            :class="
+              $page.url.startsWith('/admin/reporte-conciliacion')
+                ? 'text-white font-semibold'
+                : 'hover:bg-gray-100'
+            "
+            :style="
+              $page.url.startsWith('/admin/reporte-conciliacion')
+                ? 'background-color: #002f65;'
+                : ''
+            "
+          >
+            <svg
+              class="w-5 h-5 mr-3"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
+              ></path>
+            </svg>
+            Reporte de Conciliación
+          </Link>
+
           <!-- Gestión de Usuarios - Solo Admin -->
           <Link
             v-if="$page.props.auth.user.roles.some((r) => r.name === 'admin')"
