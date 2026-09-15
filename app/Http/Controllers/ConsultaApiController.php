@@ -18,14 +18,18 @@ class ConsultaApiController extends Controller
      */
     public function index()
     {
-        return Inertia::render('Admin/ConsultaApi');
+        return Inertia::render('Admin/ConsultaApi', [
+            'anio_actual' => (int) date('Y'),
+        ]);
     }
 
     /**
      * Ejecutar la consulta de deuda por placa.
      *
-     * Reutiliza DeudaVehicularService — la misma lógica (SRI + cruce con
-     * pagos locales) que usa BancaController@consultarDeuda — para que esta
+     * Reutiliza DeudaVehicularService — capa orquestadora que llama a
+     * SriVehiculoService::consultarVehiculoCompleto() y delega la
+     * conciliación en SriVehiculoService::conciliarPagosLocales() — misma
+     * lógica que usa BancaController@consultarDeuda — para que esta
      * pantalla refleje correctamente qué años ya están pagados, en vez de
      * mostrar solo el bruto del SRI.
      */
@@ -50,14 +54,27 @@ class ConsultaApiController extends Controller
             ]);
 
             return back()->with('resultado', [
-                'success'            => true,
-                'placa'              => $placa,
-                'vehiculo'           => $resultado['vehiculo'],
+                'success'      => true,
+                'placa'        => $resultado['vehiculo']['placa'],
+                'vehiculo'     => [
+                    'marca'       => $resultado['vehiculo']['marca'],
+                    'modelo'      => $resultado['vehiculo']['modelo'],
+                    'anio'        => $resultado['vehiculo']['anio'],
+                    'tipo'        => $resultado['vehiculo']['clase'] ?? 'AUTOMÓVIL',
+                    'descripcion' => $resultado['vehiculo']['descripcion_completa'] ?? '',
+                ],
                 'valor_matricula'    => $resultado['valor_matricula'],
-                'todos_pagados'      => $resultado['todos_pagados'],
+                // Desglose ya conciliado: cada año trae 'estado' (pagado|pendiente)
+                // y, si corresponde, el sub-objeto 'pago' con comprobante/referencia/entidad/registro_historico.
                 'desglose_anual'     => $resultado['desglose_anual'],
+                'todos_pagados'      => $resultado['todos_pagados'],
+                // Bruto: lo que calcula el sistema a partir de la matrícula del SRI,
+                // SIN descontar pagos locales. Solo para fines informativos/auditoría.
                 'totales_brutos'     => $resultado['totales_sri'],
+                // Neto: lo que realmente falta por pagar según la BD local.
+                // Este es el valor que debe usarse para decidir si hay deuda.
                 'totales_pendientes' => $resultado['totales_pendientes'],
+                'metodo_sri'         => $resultado['metodo_sri'],
             ]);
 
         } catch (\Throwable $e) {

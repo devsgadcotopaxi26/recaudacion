@@ -2,22 +2,24 @@
 
 namespace App\Services;
 
-use App\Models\Pago;
-
 /**
  * Consulta de deuda vehicular: combina el cálculo del SRI (vía
- * SriVehiculoService) con el cruce contra pagos locales, para determinar
+ * SriVehiculoService::consultarVehiculoCompleto) con el cruce contra pagos
+ * locales (vía SriVehiculoService::conciliarPagosLocales), para determinar
  * qué años fiscales están realmente pendientes (no solo lo que reporta el
  * SRI en bruto).
  *
- * Única implementación de esta lógica en el sistema: la usan tanto la API
- * bancaria (BancaController::consultarDeuda, que además genera
- * codigo_consulta y audita en ConsultaBancaria) como el panel de ventanilla
- * (VerificadorConsultaDeudaController, de solo lectura) — para no mantener
- * dos criterios distintos de "qué años están pendientes".
+ * Es una capa orquestadora, no reimplementa la conciliación: delega en
+ * conciliarPagosLocales() (fuente única de esa regla, compartida también
+ * por cualquier otro consumidor directo de SriVehiculoService) y solo
+ * añade encima los datos que esa función no maneja (vehiculo, valor de
+ * matrícula, totales brutos del SRI, método usado).
  *
- * No tiene efectos secundarios propios: solo lee `pagos` y transforma lo
- * que devuelve SriVehiculoService.
+ * Único punto de entrada de esta lógica combinada en el sistema: lo usan
+ * tanto la API bancaria (BancaController::consultarDeuda, que además
+ * genera codigo_consulta y audita en ConsultaBancaria) como el panel admin
+ * (ConsultaApiController) — para no mantener dos criterios distintos de
+ * "qué años están pendientes".
  */
 class DeudaVehicularService
 {
@@ -40,43 +42,15 @@ class DeudaVehicularService
     {
         $placa = strtoupper($placa);
         $datos = $this->sriService->consultarVehiculoCompleto($placa);
-
-        // Todos los pagos 'pagado' de esta placa, indexados por año fiscal
-        $pagosExistentes = Pago::where('placa', $placa)
-            ->where('estado', 'pagado')
-            ->get()
-            ->keyBy('anio_fiscal');
-
-        // Marcar cada año del desglose SRI como pagado o pendiente
-        $desgloseConEstado = collect($datos['desglose_anual'])->map(function ($anio) use ($pagosExistentes) {
-            $pago = $pagosExistentes->get($anio['anio']);
-            $anio['estado'] = $pago ? 'pagado' : 'pendiente';
-            if ($pago) {
-                $anio['pago'] = [
-                    'pago_id' => $pago->id,
-                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'codigo_consulta' => $pago->datos_adicionales['codigo_consulta'] ?? null,
-                    'referencia' => $pago->referencia_pago,
-                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
-                    'entidad' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
-                ];
-            }
-            return $anio;
-        })->values()->toArray();
-
-        $aniosPendientes = collect($desgloseConEstado)->where('estado', 'pendiente');
+        $conciliacion = $this->sriService->conciliarPagosLocales($placa, $datos['desglose_anual']);
 
         return [
             'vehiculo' => $datos['vehiculo'],
             'valor_matricula' => $datos['valor_matricula'],
-            'todos_pagados' => $aniosPendientes->isEmpty(),
-            'desglose_anual' => $desgloseConEstado,
+            'todos_pagados' => $conciliacion['todos_pagados'],
+            'desglose_anual' => $conciliacion['desglose_anual'],
             'totales_sri' => $datos['totales'],
-            'totales_pendientes' => [
-                'total_rodaje' => round($aniosPendientes->sum('rodaje'), 2),
-                'total_mora' => round($aniosPendientes->sum('mora'), 2),
-                'total_a_pagar' => round($aniosPendientes->sum('valor'), 2),
-            ],
+            'totales_pendientes' => $conciliacion['totales_pendientes'],
             'metodo_sri' => $datos['metodo_sri'] ?? 'deuda',
         ];
     }
