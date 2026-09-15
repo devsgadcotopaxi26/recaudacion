@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use App\Models\SriRequest;
+use App\Models\Pago;
 use Exception;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException as HttpRequestException;
@@ -79,10 +80,15 @@ class SriVehiculoService
 
                     $dataVehiculo = $responseBase->json();
 
-                    Log::channel('sri')->info('SRI: Response BaseVehiculo JSON', [
-                        'placa' => $placa,
-                        'body' => $dataVehiculo
-                    ]);
+                    // Una falla del logger (permisos, disco lleno, etc.) NO debe
+                    // interrumpir una respuesta válida del SRI ni disparar reintentos.
+                    try {
+                        Log::channel('sri')->info('SRI: Response BaseVehiculo JSON', [
+                            'placa' => $placa,
+                            'body' => $dataVehiculo
+                        ]);
+                    } catch (\Throwable $logError) {
+                    }
 
                     if (empty($dataVehiculo) || empty($dataVehiculo['codigoVehiculo'])) {
                         throw new Exception('No se encontró información del vehículo o su código', 404);
@@ -109,11 +115,16 @@ class SriVehiculoService
 
                     $dataRubros = $responseRubros->json();
 
-                    Log::channel('sri')->info('SRI: Response ConsultaRubros JSON', [
-                        'placa' => $placa,
-                        'codigoVehiculo' => $codigoVehiculo,
-                        'body' => $dataRubros
-                    ]);
+                    // Una falla del logger (permisos, disco lleno, etc.) NO debe
+                    // interrumpir una respuesta válida del SRI ni disparar reintentos.
+                    try {
+                        Log::channel('sri')->info('SRI: Response ConsultaRubros JSON', [
+                            'placa' => $placa,
+                            'codigoVehiculo' => $codigoVehiculo,
+                            'body' => $dataRubros
+                        ]);
+                    } catch (\Throwable $logError) {
+                    }
 
                     if (!is_array($dataRubros)) {
                         $dataRubros = [];
@@ -128,12 +139,17 @@ class SriVehiculoService
                         // y no deben afectar el cálculo de rodaje.
                         $tipoDeuda = $rubroReq['codigoTipoDeuda'] ?? '';
                         if ($tipoDeuda !== 'MATRICULA') {
-                            Log::channel('sri')->info('SRI: Rubro ignorado (no es matrícula)', [
-                                'placa'        => $placa,
-                                'tipoDeuda'    => $tipoDeuda,
-                                'descripcion'  => $rubroReq['descripcionRubro'] ?? '',
-                                'valor'        => $rubroReq['valorRubro'] ?? 0,
-                            ]);
+                            // Una falla del logger (permisos, disco lleno, etc.) NO debe
+                            // interrumpir una respuesta válida del SRI ni disparar reintentos.
+                            try {
+                                Log::channel('sri')->info('SRI: Rubro ignorado (no es matrícula)', [
+                                    'placa'        => $placa,
+                                    'tipoDeuda'    => $tipoDeuda,
+                                    'descripcion'  => $rubroReq['descripcionRubro'] ?? '',
+                                    'valor'        => $rubroReq['valorRubro'] ?? 0,
+                                ]);
+                            } catch (\Throwable $logError) {
+                            }
                             continue;
                         }
                         // ────────────────────────────────────────────────────────
@@ -868,5 +884,71 @@ class SriVehiculoService
                 throw $e;
             }
         });
+    }
+
+    /**
+     * Conciliar un desglose anual (ya calculado desde el SRI) contra los pagos
+     * registrados localmente en la tabla `pagos`.
+     *
+     * Regla de negocio (única fuente de verdad para "deuda realmente pendiente"):
+     * un año fiscal se considera PAGADO si existe un registro en `pagos` con
+     * esa `placa`, ese `anio_fiscal` y `estado = 'pagado'`, sin importar lo
+     * que el SRI siga reportando para ese año (el SRI no se entera de los
+     * pagos hechos por este sistema).
+     *
+     * Este método NO tiene efectos secundarios: solo lee `pagos` y transforma
+     * el arreglo recibido. No crea registros de auditoría ni toca caché.
+     *
+     * @param string $placa
+     * @param array $desgloseAnual  Salida de calcularDesglosePorAnio()['desglose']
+     *                               o de consultarVehiculoCompleto()['desglose_anual']
+     * @return array{
+     *     desglose_anual: array,
+     *     todos_pagados: bool,
+     *     totales_pendientes: array{total_rodaje: float, total_mora: float, total_a_pagar: float}
+     * }
+     */
+    public function conciliarPagosLocales(string $placa, array $desgloseAnual): array
+    {
+        $placa = strtoupper($placa);
+
+        // Todos los pagos 'pagado' de esta placa, indexados por año fiscal
+        $pagosExistentes = Pago::where('placa', $placa)
+            ->where('estado', 'pagado')
+            ->get()
+            ->keyBy('anio_fiscal');
+
+        $desgloseConEstado = collect($desgloseAnual)->map(function ($anio) use ($pagosExistentes) {
+            $pago = $pagosExistentes->get($anio['anio']);
+            $anio['estado'] = $pago ? 'pagado' : 'pendiente';
+
+            if ($pago) {
+                $codigoConsultaPago = $pago->datos_adicionales['codigo_consulta'] ?? null;
+                $anio['pago'] = [
+                    'pago_id' => $pago->id,
+                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
+                    'codigo_consulta' => $codigoConsultaPago,
+                    // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
+                    'registro_historico' => is_null($codigoConsultaPago),
+                    'referencia' => $pago->referencia_pago,
+                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
+                    'entidad' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+                ];
+            }
+
+            return $anio;
+        })->values()->toArray();
+
+        $aniosPendientes = collect($desgloseConEstado)->where('estado', 'pendiente');
+
+        return [
+            'desglose_anual' => $desgloseConEstado,
+            'todos_pagados' => $aniosPendientes->isEmpty(),
+            'totales_pendientes' => [
+                'total_rodaje' => round($aniosPendientes->sum('rodaje'), 2),
+                'total_mora' => round($aniosPendientes->sum('mora'), 2),
+                'total_a_pagar' => round($aniosPendientes->sum('valor'), 2),
+            ],
+        ];
     }
 }
