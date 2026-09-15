@@ -44,6 +44,11 @@ Route::get('/pago/callback', [PagoController::class, 'callback'])->name('pago.ca
 Route::get('/pago/confirmacion/{pago}', [PagoController::class, 'confirmacion'])->name('pago.confirmacion');
 Route::get('/comprobante/{pago}', [PagoController::class, 'comprobante'])->name('pago.comprobante');
 
+// Certificado de Pago (documento estandarizado, valido para cualquier
+// entidad recaudadora). Clave de acceso: certificado_token, no referencia_pago
+// (esa la define el banco/cooperativa externo y suele ser secuencial/adivinable).
+Route::get('/certificado/{token}', [PagoController::class, 'certificado'])->name('pago.certificado');
+
 // Ruta de verificación de comprobantes (para QR code)
 Route::get('/verificar/{referencia}', [PagoController::class, 'verificar'])->name('pago.verificar');
 
@@ -84,21 +89,26 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::get('/logs', [App\Http\Controllers\LogViewerController::class, 'index'])->name('logs');
         Route::get('/logs/download', [App\Http\Controllers\LogViewerController::class, 'download'])->name('logs.download');
         Route::post('/logs/clear', [App\Http\Controllers\LogViewerController::class, 'clear'])->name('logs.clear');
+
+        // Reporte de Conciliación (pagos registrados, filtros y totales)
+        // SOLO admin: información financiera/administrativa agregada de
+        // TODAS las entidades — no forma parte del panel de ventanilla
+        // (verificacionpagos), a diferencia de verificar-pago/consulta-api.
+        Route::get('/reporte-conciliacion', [ReporteConciliacionController::class, 'index'])->name('reporte-conciliacion.index');
+        Route::post('/reporte-conciliacion', [ReporteConciliacionController::class, 'consultar'])->name('reporte-conciliacion.consultar');
     });
 
-    // Rutas para admin y verificacionpagos
+    // Rutas para admin y verificacionpagos (ambos usan la misma URL, el
+    // mismo layout y el mismo componente — solo cambia lo que el rol puede
+    // visitar, resuelto por este middleware)
     Route::middleware('role:admin|verificacionpagos')->group(function () {
-        // Verificación de Pagos
-        Route::get('/verificar-pago', [PagoVerificacionController::class, 'index'])->name('verificar.index');
-        Route::post('/verificar-pago', [PagoVerificacionController::class, 'verificar'])->name('verificar.buscar');
-
-        // Consulta visual de API (mismos datos que el endpoint bancario)
+        // Consulta de deuda vehicular por placa
         Route::get('/consulta-api', [ConsultaApiController::class, 'index'])->name('consulta-api.index');
         Route::post('/consulta-api', [ConsultaApiController::class, 'consultar'])->name('consulta-api.consultar');
 
-        // Reporte de Conciliación (pagos registrados, filtros y totales)
-        Route::get('/reporte-conciliacion', [ReporteConciliacionController::class, 'index'])->name('reporte-conciliacion.index');
-        Route::post('/reporte-conciliacion', [ReporteConciliacionController::class, 'consultar'])->name('reporte-conciliacion.consultar');
+        // Verificación de pagos (por comprobante o QR, en una sola pantalla)
+        Route::get('/verificar-pago', [PagoVerificacionController::class, 'index'])->name('verificar.index');
+        Route::post('/verificar-pago', [PagoVerificacionController::class, 'verificar'])->name('verificar.buscar');
     });
 
     // Rutas solo para admin - Gestión de usuarios

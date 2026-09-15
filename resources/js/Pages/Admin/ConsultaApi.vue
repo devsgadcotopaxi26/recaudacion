@@ -557,7 +557,11 @@ import { ref, computed } from "vue";
 import { router, usePage } from "@inertiajs/vue3";
 import DashboardLayout from "@/Layouts/DashboardLayout.vue";
 
-const props = defineProps({
+// Página delgada envuelta en DashboardLayout: admin y verificacionpagos
+// usan la MISMA URL (/admin/consulta-api) y el mismo layout — la única
+// diferencia entre roles la resuelve el middleware role: en routes/web.php,
+// no una ruta ni un componente distinto.
+defineProps({
   anio_actual: Number,
 });
 

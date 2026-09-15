@@ -865,6 +865,7 @@ class SriVehiculoService
                     ],
                     'total_a_pagar' => $desgloseResult['total_a_pagar'],
                     'metodo_sri' => $detalle['metodo_utilizado'] ?? 'deuda',
+                    'rubros' => $rubros,
                 ];
 
                 // Guardar en caché si está habilitado

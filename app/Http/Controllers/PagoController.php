@@ -331,6 +331,51 @@ class PagoController extends Controller
     }
 
     /**
+     * Certificado de Pago: documento estandarizado, valido sin importar la
+     * entidad recaudadora donde se pago. Acceso publico via certificado_token
+     * (no referencia_pago, que define el banco/cooperativa externo).
+     */
+    public function certificado(string $token)
+    {
+        $pago = Pago::where('certificado_token', $token)->first();
+
+        if (!$pago || !$pago->estaPagado()) {
+            return redirect()->route('vehiculos.consultar')
+                ->with('error', 'Certificado no encontrado o el pago no está completado.');
+        }
+
+        $cacheKey = "certificado:pago:{$pago->id}";
+
+        $datos = Cache::remember($cacheKey, 2592000, function () use ($pago) {
+            try {
+                $datosVehiculo = $this->sriService->obtenerDetalleCompleto($pago->placa);
+
+                $vehiculo = [
+                    'placa' => $datosVehiculo['placa'] ?? $pago->placa,
+                    'marca' => $datosVehiculo['marca'] ?? '',
+                    'modelo' => $datosVehiculo['modelo'] ?? '',
+                    'anio' => $datosVehiculo['anioModelo'] ?? '',
+                ];
+            } catch (\Exception $e) {
+                $vehiculo = [
+                    'placa' => $pago->placa,
+                    'marca' => '',
+                    'modelo' => '',
+                    'anio' => '',
+                ];
+            }
+
+            return [
+                'pago' => $pago,
+                'vehiculo' => $vehiculo,
+                'entidad_recaudadora' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+            ];
+        });
+
+        return Inertia::render('Pago/Certificado', $datos);
+    }
+
+    /**
      * Verificar autenticidad de un comprobante (para QR code)
      */
     public function verificar(string $referencia)

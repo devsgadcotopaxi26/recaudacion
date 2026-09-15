@@ -41,27 +41,30 @@ class BancaController extends Controller
         $anioFiscal = $request->anio_fiscal ?? date('Y');
 
         try {
-            // Consultar al SRI (mismo flujo que la web)
-            $sriService = new \App\Services\SriVehiculoService();
-            $datos = $sriService->consultarVehiculoCompleto($placa);
+            // Consultar deuda del SRI + cruce con pagos locales. Lógica
+            // compartida con el panel admin (/admin/consulta-api) vía
+            // DeudaVehicularService — una sola implementación de la regla
+            // "qué años están realmente pendientes".
+            $deudaService = new \App\Services\DeudaVehicularService(new \App\Services\SriVehiculoService());
+            $resultado = $deudaService->consultar($placa);
 
-            // Conciliar el desglose del SRI contra los pagos registrados localmente.
-            // Lógica compartida con el panel admin (/admin/consulta-api) vía
-            // SriVehiculoService::conciliarPagosLocales() — una sola implementación
-            // de la regla "deuda pendiente = SRI menos pagos locales pagados".
-            $conciliacion = $sriService->conciliarPagosLocales($placa, $datos['desglose_anual']);
-            $desgloseConEstado = $conciliacion['desglose_anual'];
-            $todosPagados = $conciliacion['todos_pagados'];
-            $totalRodajePendiente = $conciliacion['totales_pendientes']['total_rodaje'];
-            $totalMoraPendiente = $conciliacion['totales_pendientes']['total_mora'];
-            $totalPendiente = $conciliacion['totales_pendientes']['total_a_pagar'];
+            // Nota: $resultado['desglose_anual'] ya viene conciliado por
+            // SriVehiculoService::conciliarPagosLocales() (fuente única de la
+            // regla "deuda pendiente = SRI menos pagos locales pagados"),
+            // porque DeudaVehicularService delega en ese método en vez de
+            // reimplementarlo — ver DeudaVehicularService::consultar().
+            $desgloseConEstado = $resultado['desglose_anual'];
+            $todosPagados = $resultado['todos_pagados'];
+            $totalRodajePendiente = $resultado['totales_pendientes']['total_rodaje'];
+            $totalMoraPendiente = $resultado['totales_pendientes']['total_mora'];
+            $totalPendiente = $resultado['totales_pendientes']['total_a_pagar'];
 
-            $vehiculo = $datos['vehiculo'];
+            $vehiculo = $resultado['vehiculo'];
 
             // Registrar la consulta en la base de datos
             // ── Guardia: no grabar si el resultado es incoherente (deuda con $0) ──
-            $metodoSri    = $datos['metodo_sri'] ?? 'desconocido';
-            $totalAPagar  = $datos['totales']['total_a_pagar'] ?? 0;
+            $metodoSri    = $resultado['metodo_sri'];
+            $totalAPagar  = $resultado['totales_sri']['total_a_pagar'] ?? 0;
             $esIncoherente = ($metodoSri === 'deuda' && $totalAPagar <= 0);
 
             // Generar código único de consulta: CON-YYYYMMDD-XXXXX
@@ -77,9 +80,9 @@ class BancaController extends Controller
                         'placa'          => $placa,
                         'anio_fiscal'    => $anioFiscal,
                         'metodo_sri'     => $metodoSri,
-                        'valor_matricula'=> $datos['valor_matricula'] ?? 0,
-                        'total_rodaje'   => $datos['totales']['total_rodaje'] ?? 0,
-                        'total_mora'     => $datos['totales']['total_mora'] ?? 0,
+                        'valor_matricula'=> $resultado['valor_matricula'] ?? 0,
+                        'total_rodaje'   => $resultado['totales_sri']['total_rodaje'] ?? 0,
+                        'total_mora'     => $resultado['totales_sri']['total_mora'] ?? 0,
                         'total_a_pagar'  => $totalAPagar,
                         'monto_a_pagar'  => $totalAPagar,
                         'estado'         => 'pendiente',
@@ -101,8 +104,8 @@ class BancaController extends Controller
             Log::info('API: Consulta de deuda exitosa', [
                 'placa' => $placa,
                 'anio_fiscal' => $anioFiscal,
-                'total_a_pagar' => $datos['totales']['total_a_pagar'],
-                'metodo' => $datos['metodo_sri'] ?? 'deuda'
+                'total_a_pagar' => $resultado['totales_sri']['total_a_pagar'],
+                'metodo' => $metodoSri,
             ]);
 
             return response()->json([
@@ -117,10 +120,10 @@ class BancaController extends Controller
                         'tipo' => $vehiculo['clase'] ?? 'automovil',
                         'descripcion' => $vehiculo['descripcion_completa'] ?? '',
                     ],
-                    'valor_matricula' => $datos['valor_matricula'],
+                    'valor_matricula' => $resultado['valor_matricula'],
                     'todos_pagados' => $todosPagados,
                     'desglose_anual' => $desgloseConEstado,
-                    'totales_sri' => $datos['totales'],
+                    'totales_sri' => $resultado['totales_sri'],
                     'totales_pendientes' => [
                         'total_rodaje' => $totalRodajePendiente,
                         'total_mora' => $totalMoraPendiente,

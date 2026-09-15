@@ -6,10 +6,26 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Pago extends Model
 {
     use HasFactory;
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // certificado_token identifica al pago en /certificado/{token} (acceso
+        // público al Certificado de Pago). No reutiliza referencia_pago porque
+        // esa la define el banco/cooperativa externo y suele ser secuencial
+        // (ej. TXN-COOP-001) — no apta como clave de acceso no adivinable.
+        static::creating(function (Pago $pago) {
+            if (empty($pago->certificado_token)) {
+                $pago->certificado_token = Str::random(32);
+            }
+        });
+    }
 
     protected $fillable = [
         'vehiculo_id',

@@ -59,13 +59,18 @@ class AuthController extends Controller
             // Limpiar rate limiting en login exitoso
             RateLimiter::clear($key);
 
-            // Redirigir según el rol del usuario
+            // Redirigir según el rol del usuario. NO se usa redirect()->intended()
+            // a propósito: si el visitante fue rebotado hacia login desde una
+            // ruta role:admin (ej. /admin/dashboard) sin tener ese rol, Laravel
+            // guarda esa URL como "intended" y redirect()->intended() lo habría
+            // devuelto ahí después de loguearse, chocando con el middleware
+            // role: y mostrando un 403 justo después de iniciar sesión.
             $user = Auth::user();
 
             if ($user->hasRole('admin')) {
-                return redirect()->intended(route('admin.dashboard'));
+                return redirect()->route('admin.dashboard');
             } else {
-                return redirect()->intended(route('admin.consulta-api.index'));
+                return redirect()->route('admin.consulta-api.index');
             }
         }
 
