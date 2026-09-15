@@ -4,20 +4,28 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
+use Inertia\Inertia;
 
 class LogViewerController extends Controller
 {
     /**
-     * Mostrar visor de logs
+     * Mostrar visor de logs (página Inertia independiente, mismo layout
+     * que el resto del panel admin).
      */
     public function index(Request $request)
     {
+        $filtros = [
+            'level' => $request->level ?? 'all',
+            'search' => $request->search ?? '',
+        ];
+
         $logPath = storage_path('logs/laravel.log');
 
         if (!File::exists($logPath)) {
-            return view('admin.log-viewer', [
+            return Inertia::render('Logs/Index', [
                 'logs' => [],
-                'error' => 'No se encontró el archivo de log'
+                'error' => 'No se encontró el archivo de log',
+                'filtros' => $filtros,
             ]);
         }
 
@@ -43,12 +51,9 @@ class LogViewerController extends Controller
             });
         }
 
-        return view('admin.log-viewer', [
+        return Inertia::render('Logs/Index', [
             'logs' => array_values($logs),
-            'filters' => [
-                'level' => $request->level ?? 'all',
-                'search' => $request->search ?? ''
-            ]
+            'filtros' => $filtros,
         ]);
     }
 

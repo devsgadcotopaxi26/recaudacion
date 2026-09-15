@@ -6,6 +6,9 @@
 /storage/logs/*.log
 /storage/logs
 /vendor
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/views/*
 
 # Laravel runtime
 /storage/framework/cache/data/*

@@ -784,36 +784,20 @@ class BancaController extends Controller
         }
 
         try {
-            $desde = $request->fecha_desde . ' 00:00:00';
-            $hasta = $request->fecha_hasta . ' 23:59:59';
+            // Lógica de filtrado/resumen centralizada en ConciliacionReporteService
+            // (compartida con el panel admin en /admin/reporte-conciliacion) para
+            // no mantener dos implementaciones de la misma regla de negocio.
+            $service = new \App\Services\ConciliacionReporteService();
 
-            $query = Pago::whereBetween('created_at', [$desde, $hasta]);
-
-            // Filtro opcional por entidad
-            if ($request->filled('entidad')) {
-                $entidad = $request->entidad;
-                $query->where('datos_adicionales->entidad_recaudadora', 'like', "%{$entidad}%");
-            }
-
-            // Filtro opcional por estado
-            if ($request->filled('estado')) {
-                $query->where('estado', $request->estado);
-            }
-
-            // Filtro opcional por placa
-            if ($request->filled('placa')) {
-                $query->where('placa', strtoupper($request->placa));
-            }
-
-            // Filtro opcional por año fiscal
-            if ($request->filled('anio_fiscal')) {
-                $query->where('anio_fiscal', $request->anio_fiscal);
-            }
-
-            // Filtro opcional por código de consulta
-            if ($request->filled('codigo_consulta')) {
-                $query->where('datos_adicionales->codigo_consulta', $request->codigo_consulta);
-            }
+            $query = $service->construirQuery([
+                'fecha_desde' => $request->fecha_desde,
+                'fecha_hasta' => $request->fecha_hasta,
+                'entidad' => $request->entidad,
+                'estado' => $request->estado,
+                'placa' => $request->placa,
+                'anio_fiscal' => $request->anio_fiscal,
+                'codigo_consulta' => $request->codigo_consulta,
+            ]);
 
             $pagos = $query->orderBy('created_at', 'asc')->get();
 
@@ -823,38 +807,10 @@ class BancaController extends Controller
             $fallidos = $pagos->where('estado', 'fallido');
 
             // Agrupar por entidad para comparar
-            $porEntidad = $pagos->groupBy(function ($pago) {
-                return $pago->datos_adicionales['entidad_recaudadora'] ?? 'Sin entidad';
-            })->map(function ($pagosPorEntidad, $nombreEntidad) {
-                $pagadosEntidad = $pagosPorEntidad->where('estado', 'pagado');
-                return [
-                    'entidad' => $nombreEntidad,
-                    'total_transacciones' => $pagosPorEntidad->count(),
-                    'pagados' => $pagadosEntidad->count(),
-                    'monto_total_pagado' => round($pagadosEntidad->sum('monto_total'), 2),
-                    'pendientes' => $pagosPorEntidad->where('estado', 'pendiente')->count(),
-                    'fallidos' => $pagosPorEntidad->where('estado', 'fallido')->count(),
-                ];
-            })->values();
+            $porEntidad = $service->resumenPorEntidad($pagos);
 
             // Detalle de cada pago
-            $detalle = $pagos->map(function ($pago) {
-                return [
-                    'pago_id' => $pago->id,
-                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'placa' => $pago->placa,
-                    'anio_fiscal' => $pago->anio_fiscal,
-                    'monto_impuesto' => round((float) $pago->monto_impuesto, 2),
-                    'monto_total' => round((float) $pago->monto_total, 2),
-                    'estado' => $pago->estado,
-                    'referencia_pago' => $pago->referencia_pago,
-                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
-                    'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
-                    'entidad_recaudadora' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
-                    'codigo_consulta' => $pago->datos_adicionales['codigo_consulta'] ?? null,
-                    'metodo_pago' => $pago->datos_adicionales['metodo_pago'] ?? null,
-                ];
-            });
+            $detalle = $pagos->map(fn($pago) => $service->formatearDetalle($pago));
 
             Log::info('API: Reporte admin de conciliación generado', [
                 'solicitado_por' => $request->entidad_nombre,

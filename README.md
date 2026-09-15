@@ -208,12 +208,31 @@ php artisan route:clear
 # Ver rutas
 php artisan route:list
 
-# Ejecutar queue worker (para webhooks)
-php artisan queue:work
-
 # Ejecutar migraciones frescas
 php artisan migrate:fresh --seed
 ```
+
+### ⚙️ Colas (`QUEUE_CONNECTION`)
+
+El proyecto usa `QUEUE_CONNECTION=sync` (ver `.env.example`): los trabajos
+despachados con `dispatch()` se ejecutan inmediatamente, en el mismo
+request, en vez de encolarse en la tabla `jobs` a la espera de un worker.
+
+Esto se eligió porque el único uso actual de `dispatch()` es el registro de
+métricas de cada llamada al SRI (`SriVehiculoService::trackRequest()` →
+tabla `sri_requests`, consumida por "Estado del SRI" en el Dashboard): con
+`QUEUE_CONNECTION=database` y ningún `php artisan queue:work` corriendo,
+esos trabajos se acumulaban sin procesarse nunca y `sri_requests` quedaba
+siempre vacía. El propio `dispatch()` y la escritura a `SriRequest::create()`
+están envueltos en su propio `try/catch` (nunca relanzan), así que ejecutarlo
+de forma síncrona no puede tumbar la respuesta real al ciudadano/banco.
+
+Si en el futuro se agregan trabajos más pesados a la cola (envío de correos,
+generación de PDFs, etc.) y el procesamiento síncrono empieza a impactar la
+latencia, cambiar `QUEUE_CONNECTION` a `database` y levantar un proceso
+`php artisan queue:work` persistente (vía supervisor, o un servicio `worker`
+aparte en `docker-compose.yml`) — de lo contrario los jobs quedarán
+pendientes sin procesar, igual que ocurrió antes.
 
 ## 🛠️ Desarrollo
 
