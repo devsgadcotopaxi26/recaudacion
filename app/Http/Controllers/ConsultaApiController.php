@@ -2,25 +2,32 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\SriVehiculoService;
+use App\Services\DeudaVehicularService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 
 class ConsultaApiController extends Controller
 {
-    /**
-     * Mostrar página de consulta visual de la API
-     */
-    public function index()
+    public function __construct(private DeudaVehicularService $deudaService)
     {
-        return Inertia::render('Admin/ConsultaApi', [
-            'anio_actual' => (int) date('Y'),
-        ]);
     }
 
     /**
-     * Ejecutar la consulta (misma lógica que el endpoint bancario)
+     * Mostrar página de consulta visual de deuda vehicular
+     */
+    public function index()
+    {
+        return Inertia::render('Admin/ConsultaApi');
+    }
+
+    /**
+     * Ejecutar la consulta de deuda por placa.
+     *
+     * Reutiliza DeudaVehicularService — la misma lógica (SRI + cruce con
+     * pagos locales) que usa BancaController@consultarDeuda — para que esta
+     * pantalla refleje correctamente qué años ya están pagados, en vez de
+     * mostrar solo el bruto del SRI.
      */
     public function consultar(Request $request)
     {
@@ -31,33 +38,26 @@ class ConsultaApiController extends Controller
             'placa.max'      => 'La placa no puede exceder 10 caracteres.',
         ]);
 
-        $placa      = strtoupper($request->placa);
-        $anioActual = (int) date('Y');
+        $placa = strtoupper($request->placa);
 
         try {
-            $sriService = new SriVehiculoService();
-            $datos      = $sriService->consultarVehiculoCompleto($placa);
+            $resultado = $this->deudaService->consultar($placa);
 
             Log::info('Admin/ConsultaApi: Consulta exitosa', [
                 'placa' => $placa,
                 'user'  => auth()->user()->email,
+                'todos_pagados' => $resultado['todos_pagados'],
             ]);
 
             return back()->with('resultado', [
-                'success'      => true,
-                'placa'        => $datos['vehiculo']['placa'],
-                'vehiculo'     => [
-                    'marca'       => $datos['vehiculo']['marca'],
-                    'modelo'      => $datos['vehiculo']['modelo'],
-                    'anio'        => $datos['vehiculo']['anio'],
-                    'tipo'        => $datos['vehiculo']['clase'] ?? 'AUTOMÓVIL',
-                    'descripcion' => $datos['vehiculo']['descripcion_completa'] ?? '',
-                ],
-                'valor_matricula' => $datos['valor_matricula'],
-                'desglose_anual'  => $datos['desglose_anual'],
-                'totales'         => $datos['totales'],
-                'metodo_sri'      => $datos['metodo_sri'] ?? 'deuda',
-                'pago_previo'     => null,
+                'success'            => true,
+                'placa'              => $placa,
+                'vehiculo'           => $resultado['vehiculo'],
+                'valor_matricula'    => $resultado['valor_matricula'],
+                'todos_pagados'      => $resultado['todos_pagados'],
+                'desglose_anual'     => $resultado['desglose_anual'],
+                'totales_brutos'     => $resultado['totales_sri'],
+                'totales_pendientes' => $resultado['totales_pendientes'],
             ]);
 
         } catch (\Throwable $e) {

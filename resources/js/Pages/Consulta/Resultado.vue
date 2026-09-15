@@ -8,6 +8,10 @@ const props = defineProps({
   ya_pagado: Boolean,
   pago_existente: Object,
   anio_actual: Number,
+  pasarela_habilitada: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const procesando = ref(false);
@@ -18,6 +22,17 @@ const formatCurrency = (value) => {
     currency: "USD",
   }).format(value);
 };
+
+// Deuda atrasada = SRI reporta más de un año pendiente en desglose_anual.
+// Cada fila de ese array es, por definición, un año no pagado (el SRI no
+// incluye ahí los años ya cubiertos).
+const tieneDeudaAtrasada = computed(
+  () => (props.vehiculo.desglose_anual?.length ?? 0) > 1,
+);
+
+const mostrarInstruccionesPago = computed(
+  () => !props.ya_pagado && props.pasarela_habilitada,
+);
 
 const iniciarPago = () => {
   procesando.value = true;
@@ -146,8 +161,50 @@ const iniciarPago = () => {
           </div>
         </div>
 
+        <!-- Desglose por Año (solo si hay más de un año pendiente) -->
+        <div v-if="tieneDeudaAtrasada" class="card mb-6">
+          <h2 class="text-xl font-bold text-gray-900 mb-4 pb-2 border-b">
+            Desglose por Año
+          </h2>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-gray-600 border-b">
+                  <th class="py-2 pr-4">Año</th>
+                  <th class="py-2 pr-4">Rodaje</th>
+                  <th class="py-2 pr-4">Mora</th>
+                  <th class="py-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="anio in vehiculo.desglose_anual"
+                  :key="anio.anio"
+                  class="border-b last:border-0"
+                >
+                  <td class="py-2 pr-4 font-medium text-gray-900">
+                    {{ anio.anio }}
+                  </td>
+                  <td class="py-2 pr-4 text-gray-700">
+                    {{ formatCurrency(anio.rodaje) }}
+                  </td>
+                  <td class="py-2 pr-4 text-gray-700">
+                    {{ formatCurrency(anio.mora) }}
+                  </td>
+                  <td class="py-2 text-right font-semibold text-gray-900">
+                    {{ formatCurrency(anio.valor) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Información de Pago -->
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+        <div
+          v-if="mostrarInstruccionesPago"
+          class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6"
+        >
           <div class="flex">
             <svg
               class="w-5 h-5 text-yellow-600 mr-3 flex-shrink-0 mt-0.5"
@@ -203,7 +260,7 @@ const iniciarPago = () => {
               </div>
               <a
                 v-if="pago_existente"
-                :href="`/comprobante/${pago_existente.id}`"
+                :href="`/certificado/${pago_existente.certificado_token}`"
                 target="_blank"
                 class="w-full btn btn-success py-3 text-center text-lg flex items-center justify-center"
               >
@@ -220,14 +277,14 @@ const iniciarPago = () => {
                     d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                   />
                 </svg>
-                Ver Comprobante
+                Ver Certificado de Pago
               </a>
             </div>
           </template>
 
-          <!-- SI NO HA PAGADO: Mostrar botón de pago -->
+          <!-- SI NO HA PAGADO Y LA PASARELA ESTÁ HABILITADA: Mostrar botón de pago -->
           <button
-            v-else
+            v-else-if="pasarela_habilitada"
             @click="iniciarPago"
             :disabled="procesando"
             class="flex-1 btn bg-green-600 text-white hover:bg-green-700 focus:ring-4 focus:ring-green-200 py-3 text-lg"

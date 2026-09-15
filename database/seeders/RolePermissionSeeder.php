@@ -30,6 +30,14 @@ class RolePermissionSeeder extends Seeder
         ]);
 
         // Crear rol VerificacionPagos y asignar solo permiso de verificar pagos
+        //
+        // NOTA: este es el rol de "ventanilla" (personal que valida pagos por
+        // comprobante/QR y consulta deudas por placa desde /admin/verificar-pago
+        // y /verificador/consulta-deuda). El nombre "verificacionpagos" es
+        // histórico -- NO está acoplado a PaymentGatewayService ni a ninguna
+        // pasarela de pagos; es un rol puramente de verificación/consulta
+        // interna. Se decidió mantener este nombre (en vez de crear un rol
+        // nuevo "verificador") para no migrar datos de roles ya asignados.
         $verificadorRole = Role::create(['name' => 'verificacionpagos']);
         $verificadorRole->givePermissionTo('verificar-pagos');
 

@@ -15,7 +15,8 @@ class PagoVerificacionController extends Controller
     }
 
     /**
-     * Mostrar página de verificación de pagos
+     * Mostrar página de verificación de pagos (comprobante + QR, en un solo
+     * lugar: la tarjeta de escaneo QR vive dentro de esta misma pantalla).
      */
     public function index()
     {
@@ -23,7 +24,11 @@ class PagoVerificacionController extends Controller
     }
 
     /**
-     * Verificar un pago por su referencia
+     * Verificar un pago por número de comprobante (PAG-XXXXXX o el id
+     * numérico) o por su referencia_pago tal cual — el mismo campo de
+     * texto acepta ambos formatos, para cubrir tanto el comprobante
+     * impreso/QR (referencia_pago) como el "PAG-XXXXXX" que se usa en el
+     * resto del sistema (API bancaria, Reporte de Conciliación).
      */
     public function verificar(Request $request)
     {
@@ -31,15 +36,13 @@ class PagoVerificacionController extends Controller
             'referencia' => 'required|string|max:255',
         ]);
 
-        $referencia = $request->referencia;
-
-        // Buscar pago por referencia
-        $pago = Pago::where('referencia_pago', $referencia)->first();
+        $busqueda = trim($request->referencia);
+        $pago = $this->buscarPago($busqueda);
 
         if (!$pago) {
             return Inertia::render('Admin/VerificarPago', [
-                'error' => 'No se encontró ningún pago con esta referencia.',
-                'referenciaBuscada' => $referencia,
+                'error' => 'No se encontró ningún pago con este comprobante o referencia.',
+                'referenciaBuscada' => $busqueda,
             ]);
         }
 
@@ -62,6 +65,7 @@ class PagoVerificacionController extends Controller
         return Inertia::render('Admin/VerificarPago', [
             'pagoEncontrado' => [
                 'id' => $pago->id,
+                'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
                 'referencia' => $pago->referencia_pago,
                 'placa' => $pago->placa,
                 'monto_impuesto' => floatval($pago->monto_impuesto),
@@ -78,5 +82,25 @@ class PagoVerificacionController extends Controller
                 ] : null,
             ],
         ]);
+    }
+
+    /**
+     * Busca un Pago admitiendo dos formatos en el mismo campo de texto:
+     *  - "PAG-XXXXXX" o un número puro  → se interpreta como el id del pago.
+     *  - cualquier otro texto           → se busca tal cual en referencia_pago
+     *    (el dato que codifica el QR del comprobante).
+     *
+     * Se prioriza la coincidencia exacta por referencia_pago (es el
+     * identificador "fuerte" del pago); si no hay match, se intenta como id.
+     */
+    private function buscarPago(string $busqueda): ?Pago
+    {
+        $pago = Pago::where('referencia_pago', $busqueda)->first();
+
+        if (!$pago && preg_match('/^(?:PAG-)?0*([0-9]+)$/i', $busqueda, $matches) && $matches[1] !== '') {
+            $pago = Pago::find((int) $matches[1]);
+        }
+
+        return $pago;
     }
 }

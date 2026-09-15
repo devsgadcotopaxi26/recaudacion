@@ -65,12 +65,15 @@ class VehiculoController extends Controller
                         'impuesto' => $datos['impuesto'],
                         'total_a_pagar' => $datos['total_a_pagar'],
                         'rubros' => $datos['rubros'],
+                        'desglose_anual' => $datos['desglose_anual'],
                     ]
                 ),
+                'pasarela_habilitada' => config('pagos.pasarela_ciudadana_habilitada'),
                 'ya_pagado' => $pagoPrevio ? true : false,
                 'pago_existente' => $pagoPrevio ? [
                     'id' => $pagoPrevio->id,
                     'referencia' => $pagoPrevio->referencia_pago,
+                    'certificado_token' => $pagoPrevio->certificado_token,
                     'fecha' => $pagoPrevio->fecha_pago,
                     'monto' => $pagoPrevio->monto_total,
                 ] : null,
