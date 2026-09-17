@@ -55,9 +55,6 @@ class BancaController extends Controller
             // reimplementarlo — ver DeudaVehicularService::consultar().
             $desgloseConEstado = $resultado['desglose_anual'];
             $todosPagados = $resultado['todos_pagados'];
-            $totalRodajePendiente = $resultado['totales_pendientes']['total_rodaje'];
-            $totalMoraPendiente = $resultado['totales_pendientes']['total_mora'];
-            $totalPendiente = $resultado['totales_pendientes']['total_a_pagar'];
 
             $vehiculo = $resultado['vehiculo'];
 
@@ -123,12 +120,14 @@ class BancaController extends Controller
                     'valor_matricula' => $resultado['valor_matricula'],
                     'todos_pagados' => $todosPagados,
                     'desglose_anual' => $desgloseConEstado,
-                    'totales_sri' => $resultado['totales_sri'],
-                    'totales_pendientes' => [
-                        'total_rodaje' => $totalRodajePendiente,
-                        'total_mora' => $totalMoraPendiente,
-                        'total_a_pagar' => $totalPendiente,
-                    ],
+                    // Único objeto de totales en el contrato público (compatibilidad con
+                    // el manual v1.0.0 ya entregado a bancos/cooperativas, que documenta
+                    // 'totales'). Es el NETO — ya descuenta pagos locales — no el bruto del
+                    // SRI: un banco solo necesita el monto real a cobrar, no tiene por qué
+                    // distinguir bruto/neto. 'totales_sri' y 'totales_pendientes' como
+                    // campos separados solo existen en el panel admin interno
+                    // (ConsultaApiController), nunca en esta respuesta pública.
+                    'totales' => $resultado['totales_pendientes'],
                     'nota' => $todosPagados
                         ? 'Todos los años están pagados. No hay deuda pendiente.'
                         : 'Use el codigo_consulta al registrar el pago. Válido por 24 horas.',

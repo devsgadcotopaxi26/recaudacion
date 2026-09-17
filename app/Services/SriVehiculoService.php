@@ -235,6 +235,12 @@ class SriVehiculoService
                         'cilindraje' => $dataVehiculo['cilindraje'] ?? 0,
                         'total' => $totalMatricula,
                         'ya_al_dia' => $yaAlDia,  // ← señal para el método principal
+                        // Año hasta el que el SRI reporta pagado. Ya NO se usa para decidir
+                        // si un año está pagado (eso lo decide exclusivamente la tabla local
+                        // `pagos`, vía conciliarPagosLocales()) — solo sirve como cota para
+                        // acotar el rango de años candidatos a calcular cuando ConsultaRubros
+                        // viene vacío y no hay historial de pagos local (ver consultarVehiculoCompleto()).
+                        'ultimo_anio_pagado' => $ultimoAnioPagado,
                         // 'deudas' vacío = no debe nada (deuda ya pagada o sin rubros)
                         'deudas' => [],
                     ];
@@ -779,6 +785,9 @@ class SriVehiculoService
                 //    ✔ Sin deudas y sin ya_al_dia        → intentar historial igual
                 // ─────────────────────────────────────────────────────────────────────
                 $yaAlDia = $detalleBase['ya_al_dia'] ?? false;
+                // Cota informativa del SRI (NO decide pagado/pendiente — solo acota el
+                // rango de años candidatos cuando no hay historial local, ver más abajo).
+                $ultimoAnioPagadoSri = intval($detalleBase['ultimo_anio_pagado'] ?? 0);
 
                 if ($detalleBase && isset($detalleBase['deudas']) && !empty($detalleBase['deudas'])) {
                     // ── Caso 1: Tiene deudas activas de matrícula ──
@@ -830,8 +839,81 @@ class SriVehiculoService
                 $impuesto = $this->calcularImpuesto($valorMatricula);
                 $rubros = $this->extraerRubros($detalle);
 
-                // Calcular desglose y totales reales
-                $desgloseResult = $this->calcularDesglosePorAnio($detalle, $anioActualSimulado);
+                // Calcular desglose y totales reales.
+                //
+                // Regla de negocio: la tabla local `pagos` es la ÚNICA fuente de verdad
+                // sobre si un año está pagado — la decide conciliarPagosLocales(), que se
+                // aplica después de este método (en DeudaVehicularService::consultar()).
+                // El SRI (ya_al_dia / ConsultaRubros vacío) NO se usa para decidir eso.
+                //
+                // Rama 'historial' (ConsultaRubros vino vacío): en vez de un atajo a $0
+                // basado en ya_al_dia (que escondía deuda real no reportada por
+                // ConsultaRubros pero tampoco pagada en `pagos` — caso confirmado: HBA2552
+                // mostraba total_a_pagar: 25.16 reconstruido desde el último pago ya
+                // realizado, cuando el atajo anterior lo forzaba a $0 solo si ya_al_dia era
+                // true), generamos años candidatos a calcular con calcularDesglosePorAnio()
+                // en modo NO desde_pago (mismo cálculo que usa la rama 'deuda'). Quién queda
+                // 'pagado' vs 'pendiente' lo decide después conciliarPagosLocales() contra
+                // `pagos` — este método solo decide QUÉ años y QUÉ monto candidato calcular.
+                if ($detalle['metodo_utilizado'] === 'historial') {
+                    $anioActualCalc = $anioActualSimulado ?? intval(date('Y'));
+
+                    // Rango de años candidatos, en orden de confiabilidad:
+                    // 1) Pagos locales de esta placa: desde el año siguiente al último
+                    //    pagado localmente hasta hoy — la fuente más específica, sabemos
+                    //    exactamente qué años ya cubrimos por este sistema.
+                    // 2) Sin pagos locales: ultimoAnioPagado que reporta el SRI (+1) — no
+                    //    se usa para decidir "pagado" (eso sigue siendo solo `pagos`), sólo
+                    //    para no generar candidatos de años que el propio SRI ya declaró
+                    //    cubiertos en algún momento.
+                    // 3) Limitación conocida: si tampoco hay esa señal (SRI no la reportó,
+                    //    valor 0), no queda ningún dato real para acotar el rango — se
+                    //    calcula únicamente el año actual como candidato mínimo.
+                    $maxAnioPagadoLocal = Pago::where('placa', $placa)
+                        ->where('estado', 'pagado')
+                        ->max('anio_fiscal');
+
+                    if ($maxAnioPagadoLocal) {
+                        $anioInicioCandidatos = (int) $maxAnioPagadoLocal + 1;
+                    } elseif ($ultimoAnioPagadoSri > 0) {
+                        $anioInicioCandidatos = $ultimoAnioPagadoSri + 1;
+                    } else {
+                        $anioInicioCandidatos = $anioActualCalc;
+                    }
+
+                    if ($anioInicioCandidatos > $anioActualCalc) {
+                        // Ya cubierto (local o SRI) hasta el año actual: sin candidatos.
+                        $desgloseResult = [
+                            'desglose' => [],
+                            'total_rodaje' => 0,
+                            'total_mora' => 0,
+                            'total_a_pagar' => 0,
+                        ];
+                    } else {
+                        // $valorMatricula es el monto del ÚLTIMO PAGO REAL conocido (ver
+                        // arriba). Limitación conocida: si ese pago cubrió más de un año en
+                        // un solo comprobante (caso confirmado: HBA2552, $240.22 por 2 años
+                        // en un solo pago), este valor se aplica completo a CADA año
+                        // candidato — no se prorratea automáticamente entre años.
+                        $detallesRubroCandidatos = [];
+                        for ($anioCand = $anioInicioCandidatos; $anioCand <= $anioActualCalc; $anioCand++) {
+                            $detallesRubroCandidatos[] = ['anio' => $anioCand, 'valor' => $valorMatricula];
+                        }
+
+                        $detalleCandidatos = [
+                            'deudas' => [[
+                                'rubros' => [[
+                                    'detallesRubro' => $detallesRubroCandidatos,
+                                ]],
+                            ]],
+                        ];
+
+                        $desgloseResult = $this->calcularDesglosePorAnio($detalleCandidatos, $anioActualSimulado);
+                    }
+                } else {
+                    // Rama 'deuda': sin cambios, comportamiento ya confirmado correcto.
+                    $desgloseResult = $this->calcularDesglosePorAnio($detalle, $anioActualSimulado);
+                }
 
                 Log::info('SRI: Consulta completada exitosamente', [
                     'placa' => $placa,
