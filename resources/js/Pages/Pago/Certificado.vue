@@ -5,6 +5,10 @@ import QrcodeVue from "qrcode.vue";
 
 const props = defineProps({
   pago: Object,
+  // Desglose de años cubiertos por esta transacción — 1 en el flujo de
+  // pasarela ciudadana, puede ser más en un pago bancario consolidado
+  // (un solo certificado/comprobante para toda la operación).
+  detalles: { type: Array, default: () => [] },
   vehiculo: Object,
   entidad_recaudadora: {
     type: String,
@@ -157,7 +161,21 @@ const urlVerificacion = computed(() => {
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200">
-              <tr>
+              <!-- Varios años cubiertos por este certificado: un renglón por año -->
+              <template v-if="detalles.length > 1">
+                <tr v-for="d in detalles" :key="d.anio_fiscal">
+                  <td class="px-4 py-3 print:py-2 text-gray-900">
+                    Impuesto al Rodaje {{ d.anio_fiscal }}
+                  </td>
+                  <td
+                    class="px-4 py-3 print:py-2 text-right font-semibold text-gray-900"
+                  >
+                    {{ formatCurrency(d.monto_total) }}
+                  </td>
+                </tr>
+              </template>
+              <!-- Un solo año (caso habitual: pasarela ciudadana o pago bancario de 1 año) -->
+              <tr v-else>
                 <td class="px-4 py-3 print:py-2 text-gray-900">
                   Impuesto al Rodaje
                 </td>

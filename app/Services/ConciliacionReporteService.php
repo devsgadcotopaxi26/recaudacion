@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\Pago;
+use App\Models\PagoDetalle;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -15,57 +15,70 @@ use Illuminate\Support\Collection;
  * `ReporteConciliacionController` (sesión + rol admin), para no duplicar
  * las reglas de filtrado ni el cálculo de totales.
  *
- * No tiene efectos secundarios: solo lee la tabla `pagos`.
+ * Granularidad: una fila por año-detalle (PagoDetalle), no por transacción
+ * — así los totales de caja por día/entidad/estado siguen cuadrando
+ * exactamente igual que antes de la reestructuración cabecera/detalle
+ * (finanzas ya usa esta pantalla contando por año fiscal, no por
+ * operación de cobro). `comprobante`/`referencia_pago` ahora salen de la
+ * transacción (cabecera) y se repiten entre las filas de un mismo pago
+ * multi-año — antes cada año tenía un comprobante distinto; esto es un
+ * cambio de comportamiento intencional, no una regresión.
+ *
+ * No tiene efectos secundarios: solo lee `pago_detalles`/`transacciones_pago`.
  */
 class ConciliacionReporteService
 {
     /**
-     * Arma la query filtrada sobre `pagos`.
+     * Arma la query filtrada sobre `pago_detalles` (con su transacción
+     * cargada, para los filtros/campos que viven en la cabecera).
      *
      * Filtros soportados (todos opcionales — el llamador decide cuáles
      * exigir mediante su propio Validator):
      *   fecha_desde, fecha_hasta (Y-m-d, requieren ambas para filtrar por rango),
-     *   entidad (coincidencia parcial contra datos_adicionales->entidad_recaudadora),
-     *   estado (pagado|pendiente|fallido|expirado),
+     *   entidad (coincidencia parcial contra transacciones_pago.entidad_recaudadora),
+     *   estado (pagado|pendiente|fallido|expirado|reversado),
      *   placa, anio_fiscal, codigo_consulta.
      */
     public function construirQuery(array $filtros): Builder
     {
-        $query = Pago::query();
+        $query = PagoDetalle::query()->with('transaccionPago');
 
         if (!empty($filtros['fecha_desde']) && !empty($filtros['fecha_hasta'])) {
-            $query->whereBetween('created_at', [
+            $query->whereBetween('pago_detalles.created_at', [
                 $filtros['fecha_desde'] . ' 00:00:00',
                 $filtros['fecha_hasta'] . ' 23:59:59',
             ]);
         }
 
-        if (!empty($filtros['entidad'])) {
-            $query->where('datos_adicionales->entidad_recaudadora', 'like', '%' . $filtros['entidad'] . '%');
+        if (!empty($filtros['entidad']) || !empty($filtros['codigo_consulta'])) {
+            $query->whereHas('transaccionPago', function ($q) use ($filtros) {
+                if (!empty($filtros['entidad'])) {
+                    $q->where('entidad_recaudadora', 'like', '%' . $filtros['entidad'] . '%');
+                }
+                if (!empty($filtros['codigo_consulta'])) {
+                    $q->where('codigo_consulta', $filtros['codigo_consulta']);
+                }
+            });
         }
 
         if (!empty($filtros['estado'])) {
-            $query->where('estado', $filtros['estado']);
+            $query->where('pago_detalles.estado', $filtros['estado']);
         }
 
         if (!empty($filtros['placa'])) {
-            $query->where('placa', strtoupper($filtros['placa']));
+            $query->where('pago_detalles.placa', strtoupper($filtros['placa']));
         }
 
         if (!empty($filtros['anio_fiscal'])) {
-            $query->where('anio_fiscal', $filtros['anio_fiscal']);
-        }
-
-        if (!empty($filtros['codigo_consulta'])) {
-            $query->where('datos_adicionales->codigo_consulta', $filtros['codigo_consulta']);
+            $query->where('pago_detalles.anio_fiscal', $filtros['anio_fiscal']);
         }
 
         return $query;
     }
 
     /**
-     * Resumen general por estado, sobre una colección de Pago ya cargada
-     * (debe representar TODO el conjunto filtrado, no solo una página).
+     * Resumen general por estado, sobre una colección de PagoDetalle ya
+     * cargada (debe representar TODO el conjunto filtrado, no solo una página).
      */
     public function resumenGeneral(Collection $pagos): array
     {
@@ -91,13 +104,14 @@ class ConciliacionReporteService
     }
 
     /**
-     * Resumen agrupado por entidad recaudadora, sobre una colección de Pago
-     * ya cargada (debe representar TODO el conjunto filtrado).
+     * Resumen agrupado por entidad recaudadora, sobre una colección de
+     * PagoDetalle ya cargada (con su transaccionPago, debe representar
+     * TODO el conjunto filtrado).
      */
     public function resumenPorEntidad(Collection $pagos): Collection
     {
         return $pagos->groupBy(function ($pago) {
-            return $pago->datos_adicionales['entidad_recaudadora'] ?? 'Sin entidad';
+            return $pago->transaccionPago->entidad_recaudadora ?? 'Sin entidad';
         })->map(function ($pagosPorEntidad, $nombreEntidad) {
             $pagadosEntidad = $pagosPorEntidad->where('estado', 'pagado');
             return [
@@ -115,14 +129,14 @@ class ConciliacionReporteService
      * Recaudación (solo pagos con estado='pagado') agrupada por día,
      * para los últimos $dias días (incluye hoy). Usada por el Dashboard
      * para la gráfica "Recaudación por Día" en tiempo real, con la misma
-     * fuente (`pagos`) y el mismo criterio de fecha (`created_at`) que
-     * usa el resto de este servicio.
+     * fuente (`pago_detalles`) y el mismo criterio de fecha (`created_at`)
+     * que usa el resto de este servicio.
      */
     public function recaudacionPorDia(int $dias = 7): array
     {
         $desde = date('Y-m-d 00:00:00', strtotime('-' . ($dias - 1) . ' days'));
 
-        $porFecha = Pago::where('estado', 'pagado')
+        $porFecha = PagoDetalle::where('estado', 'pagado')
             ->where('created_at', '>=', $desde)
             ->selectRaw('DATE(created_at) as fecha, SUM(monto_total) as monto')
             ->groupBy('fecha')
@@ -142,27 +156,31 @@ class ConciliacionReporteService
     }
 
     /**
-     * Formatea un Pago para el detalle del reporte. Misma forma que ya
-     * devolvía BancaController::reporteAdminConciliacion (sin campos nuevos),
-     * para no alterar el contrato del endpoint bancario existente.
+     * Formatea un PagoDetalle para el detalle del reporte. Misma forma que
+     * ya devolvía BancaController::reporteAdminConciliacion (sin campos
+     * nuevos), para no alterar el contrato del endpoint bancario existente
+     * — salvo 'comprobante'/'referencia_pago', que ahora salen de la
+     * transacción (compartidos entre años de un mismo pago multi-año, ver
+     * docblock de la clase).
      */
-    public function formatearDetalle(Pago $pago): array
+    public function formatearDetalle(PagoDetalle $pago): array
     {
-        $datosAdicionales = $pago->datos_adicionales ?? [];
+        $transaccion = $pago->transaccionPago;
+        $datosAdicionales = $transaccion->datos_adicionales ?? [];
 
         return [
-            'pago_id' => $pago->id,
-            'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
+            'pago_id' => $transaccion->id,
+            'comprobante' => $transaccion->comprobante(),
             'placa' => $pago->placa,
             'anio_fiscal' => $pago->anio_fiscal,
             'monto_impuesto' => round((float) $pago->monto_impuesto, 2),
             'monto_total' => round((float) $pago->monto_total, 2),
             'estado' => $pago->estado,
-            'referencia_pago' => $pago->referencia_pago,
-            'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
+            'referencia_pago' => $transaccion->referencia_externa,
+            'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
             'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
-            'entidad_recaudadora' => $datosAdicionales['entidad_recaudadora'] ?? null,
-            'codigo_consulta' => $datosAdicionales['codigo_consulta'] ?? null,
+            'entidad_recaudadora' => $transaccion->entidad_recaudadora,
+            'codigo_consulta' => $transaccion->codigo_consulta,
             'metodo_pago' => $datosAdicionales['metodo_pago'] ?? null,
         ];
     }

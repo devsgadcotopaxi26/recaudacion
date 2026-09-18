@@ -8,9 +8,29 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
+/**
+ * HISTÓRICO — solo lectura desde la reestructuración cabecera/detalle.
+ * Apunta a `pagos_legacy` (la vieja `pagos`, renombrada, con sus 16 filas
+ * intactas). Nada vuelve a escribir aquí: los pagos nuevos (bancarios y
+ * de pasarela ciudadana) usan App\Models\TransaccionPago + PagoDetalle.
+ * Se conserva para poder auditar/consultar lo registrado antes de este
+ * cambio (certificados ya entregados, referencias ya emitidas).
+ *
+ * RECORDATORIO: varios registros de `pagos_legacy` son datos de prueba de
+ * rondas de QA anteriores, no actividad real de bancos/cooperativas
+ * (confirmado por auditoría — ver commit de esta reestructuración). En
+ * particular, `datos_adicionales->entidad_recaudadora` en varias filas
+ * (ids 8,10,11,12,13,15,17,19 — referencias TXN-COOP-00X) tiene nombres como
+ * "Cooperativa Visandes" o "Cooperativa Cotopaxense" escritos como texto
+ * libre durante pruebas — no corresponden a ninguna entidad realmente
+ * registrada en `api_tokens`. Si alguien los ve en un reporte histórico,
+ * no son evidencia de actividad externa real.
+ */
 class Pago extends Model
 {
     use HasFactory;
+
+    protected $table = 'pagos_legacy';
 
     protected static function boot()
     {

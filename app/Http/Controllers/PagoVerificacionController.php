@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Pago;
+use App\Models\TransaccionPago;
 use App\Services\SriVehiculoService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -37,24 +37,26 @@ class PagoVerificacionController extends Controller
         ]);
 
         $busqueda = trim($request->referencia);
-        $pago = $this->buscarPago($busqueda);
+        $transaccion = $this->buscarTransaccion($busqueda);
 
-        if (!$pago) {
+        if (!$transaccion) {
             return Inertia::render('Admin/VerificarPago', [
                 'error' => 'No se encontró ningún pago con este comprobante o referencia.',
                 'referenciaBuscada' => $busqueda,
             ]);
         }
 
+        $transaccion->loadMissing('detalles');
+
         // Obtener datos del vehículo desde el SRI
         $datosVehiculo = null;
-        if ($pago->placa) {
+        if ($transaccion->placa) {
             try {
-                $datosVehiculo = $this->sriService->obtenerDetalleCompleto($pago->placa);
+                $datosVehiculo = $this->sriService->obtenerDetalleCompleto($transaccion->placa);
             } catch (\Exception $e) {
                 // Si falla la consulta al SRI, usar datos mínimos
                 $datosVehiculo = [
-                    'placa' => $pago->placa,
+                    'placa' => $transaccion->placa,
                     'marca' => 'N/A',
                     'modelo' => 'N/A',
                     'anioModelo' => 'N/A',
@@ -62,20 +64,36 @@ class PagoVerificacionController extends Controller
             }
         }
 
+        // Un detalle → misma forma de siempre (anio_fiscal/monto_total del
+        // único año). Varios detalles → esos mismos campos representan el
+        // total/primer año de la transacción, y 'detalles' trae el desglose
+        // completo para que la pantalla lo muestre.
+        $primerDetalle = $transaccion->detalles->first();
+
         return Inertia::render('Admin/VerificarPago', [
             'pagoEncontrado' => [
-                'id' => $pago->id,
-                'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                'referencia' => $pago->referencia_pago,
-                'placa' => $pago->placa,
-                'monto_impuesto' => floatval($pago->monto_impuesto),
-                'monto_total' => floatval($pago->monto_total),
-                'estado' => $pago->estado,
-                'fecha_pago' => $pago->fecha_pago?->format('d/m/Y H:i:s'),
-                'anio_fiscal' => $pago->anio_fiscal,
-                'datos_facturacion' => $pago->datos_facturacion,
+                'id' => $transaccion->id,
+                'comprobante' => $transaccion->comprobante(),
+                'referencia' => $transaccion->referencia_externa,
+                'placa' => $transaccion->placa,
+                'monto_impuesto' => floatval($primerDetalle?->monto_impuesto ?? 0),
+                'monto_total' => floatval($transaccion->monto_total),
+                'estado' => $transaccion->estado,
+                'fecha_pago' => $transaccion->fecha_pago?->format('d/m/Y H:i:s'),
+                'anio_fiscal' => $primerDetalle?->anio_fiscal,
+                'datos_facturacion' => $transaccion->datos_facturacion,
+                // Desglose completo de años cubiertos por esta transacción
+                // (relevante para pagos bancarios multi-año; un pago de
+                // pasarela ciudadana siempre trae exactamente 1).
+                'detalles' => $transaccion->detalles->map(fn($d) => [
+                    'anio_fiscal' => $d->anio_fiscal,
+                    'monto_impuesto' => floatval($d->monto_impuesto),
+                    'monto_mora' => floatval($d->monto_mora),
+                    'monto_total' => floatval($d->monto_total),
+                    'estado' => $d->estado,
+                ])->values(),
                 'vehiculo' => $datosVehiculo ? [
-                    'placa' => $datosVehiculo['placa'] ?? $pago->placa,
+                    'placa' => $datosVehiculo['placa'] ?? $transaccion->placa,
                     'marca' => $datosVehiculo['marca'] ?? 'N/A',
                     'modelo' => $datosVehiculo['modelo'] ?? 'N/A',
                     'anio' => $datosVehiculo['anioModelo'] ?? 'N/A',
@@ -85,22 +103,23 @@ class PagoVerificacionController extends Controller
     }
 
     /**
-     * Busca un Pago admitiendo dos formatos en el mismo campo de texto:
-     *  - "PAG-XXXXXX" o un número puro  → se interpreta como el id del pago.
-     *  - cualquier otro texto           → se busca tal cual en referencia_pago
+     * Busca una TransaccionPago admitiendo dos formatos en el mismo campo
+     * de texto:
+     *  - "PAG-XXXXXX" o un número puro  → se interpreta como el id.
+     *  - cualquier otro texto           → se busca tal cual en referencia_externa
      *    (el dato que codifica el QR del comprobante).
      *
-     * Se prioriza la coincidencia exacta por referencia_pago (es el
+     * Se prioriza la coincidencia exacta por referencia_externa (es el
      * identificador "fuerte" del pago); si no hay match, se intenta como id.
      */
-    private function buscarPago(string $busqueda): ?Pago
+    private function buscarTransaccion(string $busqueda): ?TransaccionPago
     {
-        $pago = Pago::where('referencia_pago', $busqueda)->first();
+        $transaccion = TransaccionPago::where('referencia_externa', $busqueda)->first();
 
-        if (!$pago && preg_match('/^(?:PAG-)?0*([0-9]+)$/i', $busqueda, $matches) && $matches[1] !== '') {
-            $pago = Pago::find((int) $matches[1]);
+        if (!$transaccion && preg_match('/^(?:PAG-)?0*([0-9]+)$/i', $busqueda, $matches) && $matches[1] !== '') {
+            $transaccion = TransaccionPago::find((int) $matches[1]);
         }
 
-        return $pago;
+        return $transaccion;
     }
 }

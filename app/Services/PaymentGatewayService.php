@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\Pago;
+use App\Models\TransaccionPago;
 use App\Models\Transaccion;
 use App\Models\Vehiculo;
 use Illuminate\Support\Facades\Http;
@@ -27,7 +27,7 @@ class PaymentGatewayService
     /**
      * Generar link de pago en la pasarela (Pago Medios)
      */
-    public function generarLinkPago(Pago $pago): array
+    public function generarLinkPago(TransaccionPago $pago): array
     {
         try {
             // Calcular valores con y sin IVA (IVA 12% en Ecuador)
@@ -136,7 +136,7 @@ class PaymentGatewayService
                 // Actualizar el pago con el link y token generados
                 $pago->update([
                     'link_pago' => $linkPago,
-                    'referencia_pago' => $token,
+                    'referencia_externa' => $token,
                 ]);
 
                 Log::info('Link de pago generado exitosamente', [
@@ -211,7 +211,7 @@ class PaymentGatewayService
 
             // Extraer el ID del pago del customValue (formato: PAG-X)
             $pagoId = str_replace('PAG-', '', $customValue);
-            $pago = Pago::find($pagoId);
+            $pago = TransaccionPago::find($pagoId);
 
             if (!$pago) {
                 throw new Exception("Pago no encontrado: {$pagoId}");
@@ -286,6 +286,8 @@ class PaymentGatewayService
                     'estado' => 'reversado',
                     'fecha_pago' => now(),
                 ]);
+                // Propagar a los detalles (denormalizado, ver PagoDetalle).
+                $pago->detalles()->update(['estado' => 'reversado']);
 
                 Log::warning('Pago reversado vía webhook', [
                     'pago_id' => $pago->id,
@@ -316,14 +318,14 @@ class PaymentGatewayService
     /**
      * Generar link de pago de prueba (para desarrollo)
      */
-    public function generarLinkPrueba(Pago $pago): array
+    public function generarLinkPrueba(TransaccionPago $pago): array
     {
         // Para desarrollo: generar link simulado
         $linkPrueba = route('pago.confirmacion', ['pago' => $pago->id]) . '?test=1';
 
         $pago->update([
             'link_pago' => $linkPrueba,
-            'referencia_pago' => 'TEST-' . time(),
+            'referencia_externa' => 'TEST-' . time(),
         ]);
 
         return [

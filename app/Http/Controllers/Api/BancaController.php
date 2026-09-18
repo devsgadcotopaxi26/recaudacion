@@ -4,7 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Vehiculo;
-use App\Models\Pago;
+use App\Models\TransaccionPago;
+use App\Models\PagoDetalle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
@@ -206,26 +207,27 @@ class BancaController extends Controller
         try {
             // Verificar si ya existe un pago para el año específico
             if ($anioFiscal) {
-                $pagoExistente = Pago::where('placa', $placa)
+                $detalleExistente = PagoDetalle::where('placa', $placa)
                     ->where('anio_fiscal', $anioFiscal)
                     ->where('estado', 'pagado')
+                    ->with('transaccionPago')
                     ->first();
 
-                if ($pagoExistente) {
-                    $codigoConsultaExistente = $pagoExistente->datos_adicionales['codigo_consulta'] ?? null;
+                if ($detalleExistente) {
+                    $transaccionExistente = $detalleExistente->transaccionPago;
                     return response()->json([
                         'success' => false,
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
                         'pago_existente' => [
-                            'id' => $pagoExistente->id,
-                            'comprobante' => 'PAG-' . str_pad($pagoExistente->id, 6, '0', STR_PAD_LEFT),
-                            'codigo_consulta' => $codigoConsultaExistente,
+                            'id' => $transaccionExistente->id,
+                            'comprobante' => $transaccionExistente->comprobante(),
+                            'codigo_consulta' => $transaccionExistente->codigo_consulta,
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
                             // no es un dato corrupto ni faltante).
-                            'registro_historico' => is_null($codigoConsultaExistente),
-                            'fecha_pago' => $pagoExistente->fecha_pago,
-                            'referencia' => $pagoExistente->referencia_pago,
-                            'monto' => $pagoExistente->monto_total
+                            'registro_historico' => is_null($transaccionExistente->codigo_consulta),
+                            'fecha_pago' => $transaccionExistente->fecha_pago,
+                            'referencia' => $transaccionExistente->referencia_externa,
+                            'monto' => $detalleExistente->monto_total
                         ]
                     ], 400);
                 }
@@ -269,7 +271,7 @@ class BancaController extends Controller
             $datos = $sriService->consultarVehiculoCompleto($placa);
 
             // Obtener pagos existentes de esta placa
-            $pagosExistentes = Pago::where('placa', $placa)
+            $pagosExistentes = PagoDetalle::where('placa', $placa)
                 ->where('estado', 'pagado')
                 ->pluck('anio_fiscal')
                 ->toArray();
@@ -320,40 +322,58 @@ class BancaController extends Controller
                 ], 400);
             }
 
-            // Crear un pago por cada año pendiente que se está pagando
-            $pagosCreados = [];
-            foreach ($aniosAPagar as $anioPago) {
-                $pago = Pago::create([
+            // Crear la transacción (cabecera) + un detalle por cada año
+            // pendiente que se está pagando, todo dentro de UNA sola
+            // DB::transaction() — si cualquier fila falla, se revierte
+            // completo (cabecera y detalles ya creados incluidos). Esto
+            // resuelve de raíz el bug de atomicidad detectado antes (un
+            // pago de varios años ya no puede quedar a medias committeado).
+            [$transaccion, $pagosCreados] = DB::transaction(function () use (
+                $placa,
+                $aniosAPagar,
+                $monto,
+                $request,
+                $consulta,
+                $datos
+            ) {
+                $transaccion = TransaccionPago::create([
                     'placa' => $placa,
-                    'anio_fiscal' => $anioPago['anio'],
-                    'monto_impuesto' => $anioPago['valor'],
-                    'monto_total' => $anioPago['valor'],
-                    'estado' => 'pagado',
-                    'referencia_pago' => $request->referencia_externa,
-                    'fecha_pago' => $request->fecha_pago,
-                    'api_token_id' => $request->api_token_id,
+                    'referencia_externa' => $request->referencia_externa,
+                    'codigo_consulta' => $consulta->codigo_consulta,
                     'consulta_bancaria_id' => $consulta->id,
+                    'api_token_id' => $request->api_token_id,
+                    'entidad_recaudadora' => $request->entidad_recaudadora,
+                    'monto_total' => round($monto, 2),
+                    'estado' => 'pagado',
+                    'fecha_pago' => $request->fecha_pago,
                     'datos_adicionales' => [
                         'metodo_pago' => 'API_Bancaria',
-                        'entidad_recaudadora' => $request->entidad_recaudadora,
-                        // Fuente de verdad: el código de la ConsultaBancaria ya validada
-                        // ($consulta), no el dato libre del request (aunque en este punto
-                        // ya coinciden, por diseño, ya que $consulta se buscó por ese valor).
-                        'codigo_consulta' => $consulta->codigo_consulta,
-                        'vehiculo' => $datos['vehiculo']
+                        'vehiculo' => $datos['vehiculo'],
                     ],
                 ]);
 
-                $pagosCreados[] = [
-                    'pago_id' => $pago->id,
-                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'anio_fiscal' => $anioPago['anio'],
-                    'monto' => round($anioPago['valor'], 2),
-                ];
-            }
+                $pagosCreados = [];
+                foreach ($aniosAPagar as $anioPago) {
+                    $transaccion->detalles()->create([
+                        'placa' => $placa,
+                        'estado' => 'pagado',
+                        'anio_fiscal' => $anioPago['anio'],
+                        'monto_impuesto' => $anioPago['rodaje'] ?? 0,
+                        'monto_mora' => $anioPago['mora'] ?? 0,
+                        'monto_total' => $anioPago['valor'],
+                    ]);
 
-            // Marcar la consulta como pagada
-            $consulta->update(['estado' => 'pagado']);
+                    $pagosCreados[] = [
+                        'anio_fiscal' => $anioPago['anio'],
+                        'monto' => round($anioPago['valor'], 2),
+                    ];
+                }
+
+                // Marcar la consulta como pagada
+                $consulta->update(['estado' => 'pagado']);
+
+                return [$transaccion, $pagosCreados];
+            });
 
             // Borrar cache del SRI para que la próxima consulta muestre el estado real
             \Illuminate\Support\Facades\Cache::forget("sri_full_v3_{$placa}");
@@ -361,6 +381,7 @@ class BancaController extends Controller
 
             Log::info('API: Pago registrado exitosamente', [
                 'placa' => $placa,
+                'transaccion_pago_id' => $transaccion->id,
                 'monto_total' => $monto,
                 'anios_pagados' => $aniosAPagar->pluck('anio')->toArray(),
                 'entidad' => $request->entidad_recaudadora,
@@ -375,6 +396,10 @@ class BancaController extends Controller
                 'data' => [
                     'codigo_consulta' => $consulta->codigo_consulta,
                     'placa' => $placa,
+                    // Un solo comprobante para toda la transacción, no uno por
+                    // año — coincide con lo que el ciudadano recibe en la vida
+                    // real en ventanilla (un pago de varios años = un recibo).
+                    'comprobante' => $transaccion->comprobante(),
                     'monto_total_pagado' => round($monto, 2),
                     'anios_pagados' => count($pagosCreados),
                     'fecha_registro' => now()->format('Y-m-d H:i:s'),
@@ -451,58 +476,74 @@ class BancaController extends Controller
         }
 
         try {
-            $query = Pago::query();
+            $transaccion = null;
+            $anioFiscalConsultado = null;
 
-            // Buscar por codigo_consulta (prioridad 1)
+            // Buscar por codigo_consulta (prioridad 1) o referencia externa
+            // (prioridad 2): identifican la TRANSACCIÓN completa.
             if ($request->filled('codigo_consulta')) {
-                $query->where('datos_adicionales->codigo_consulta', $request->codigo_consulta);
+                $transaccion = TransaccionPago::where('codigo_consulta', $request->codigo_consulta)->first();
+            } elseif ($request->filled('referencia_externa')) {
+                $transaccion = TransaccionPago::where('referencia_externa', $request->referencia_externa)->first();
             }
-            // Buscar por referencia externa (prioridad 2)
-            elseif ($request->filled('referencia_externa')) {
-                $query->where('referencia_pago', $request->referencia_externa);
-            }
-            // Buscar por placa + año fiscal (prioridad 3)
+            // Buscar por placa + año fiscal (prioridad 3): identifica un AÑO
+            // específico, que puede venir dentro de una transacción con más años.
             else {
-                $query->where('placa', strtoupper($request->placa));
-                $anio = $request->anio_fiscal ?? date('Y');
-                $query->where('anio_fiscal', $anio);
+                $anioFiscalConsultado = $request->anio_fiscal ?? date('Y');
+                $detalle = PagoDetalle::where('placa', strtoupper($request->placa))
+                    ->where('anio_fiscal', $anioFiscalConsultado)
+                    ->with('transaccionPago')
+                    ->first();
+                $transaccion = $detalle?->transaccionPago;
             }
 
-            $pago = $query->first();
-
-            if (!$pago) {
+            if (!$transaccion) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No se encontró ningún pago con los datos proporcionados',
                 ], 404);
             }
 
+            $transaccion->loadMissing('detalles');
+
             Log::info('API: Verificación de pago consultada', [
-                'pago_id' => $pago->id,
+                'transaccion_pago_id' => $transaccion->id,
                 'entidad' => $request->entidad_nombre,
                 'api_token_id' => $request->api_token_id,
             ]);
 
-            $codigoConsultaPago = $pago->datos_adicionales['codigo_consulta'] ?? null;
+            $detalles = $transaccion->detalles->map(function ($d) {
+                return [
+                    'anio_fiscal' => $d->anio_fiscal,
+                    'monto_impuesto' => round((float) $d->monto_impuesto, 2),
+                    'monto_mora' => round((float) $d->monto_mora, 2),
+                    'monto_total' => round((float) $d->monto_total, 2),
+                    'estado' => $d->estado,
+                ];
+            })->values();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Pago encontrado',
                 'data' => [
-                    'pago_id' => $pago->id,
-                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'codigo_consulta' => $codigoConsultaPago,
+                    'transaccion_id' => $transaccion->id,
+                    'comprobante' => $transaccion->comprobante(),
+                    'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
-                    'registro_historico' => is_null($codigoConsultaPago),
-                    'placa' => $pago->placa,
-                    'anio_fiscal' => $pago->anio_fiscal,
-                    'monto_impuesto' => round((float) $pago->monto_impuesto, 2),
-                    'monto_total' => round((float) $pago->monto_total, 2),
-                    'estado' => $pago->estado,
-                    'referencia_pago' => $pago->referencia_pago,
-                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
-                    'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
-                    'entidad_recaudadora' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+                    'registro_historico' => is_null($transaccion->codigo_consulta),
+                    'placa' => $transaccion->placa,
+                    // Si la búsqueda fue por placa+año, el año consultado puntual
+                    // (para no romper contrato con quien solo espera "este año");
+                    // 'detalles' trae SIEMPRE el desglose completo de la transacción.
+                    'anio_fiscal' => $anioFiscalConsultado,
+                    'monto_total' => round((float) $transaccion->monto_total, 2),
+                    'anios_cubiertos' => $detalles->count(),
+                    'detalles' => $detalles,
+                    'estado' => $transaccion->estado,
+                    'referencia_pago' => $transaccion->referencia_externa,
+                    'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
+                    'fecha_registro' => $transaccion->created_at->format('Y-m-d H:i:s'),
+                    'entidad_recaudadora' => $transaccion->entidad_recaudadora,
                 ]
             ], 200);
 
@@ -553,12 +594,15 @@ class BancaController extends Controller
             $hasta = $request->fecha_hasta . ' 23:59:59';
             $apiTokenId = $request->api_token_id;
 
-            // Consultar pagos de ESTA entidad en el rango de fechas
-            // Busca por api_token_id (nuevo) O por entidad_recaudadora en JSON (retrocompatibilidad)
-            $pagos = Pago::where(function ($q) use ($apiTokenId, $request) {
+            // Consultar los detalles (una fila por año-detalle, igual que
+            // antes) de ESTA entidad en el rango de fechas. Busca por
+            // api_token_id (nuevo) O por entidad_recaudadora (retrocompatibilidad)
+            // — ambos viven en la cabecera transacciones_pago.
+            $pagos = PagoDetalle::whereHas('transaccionPago', function ($q) use ($apiTokenId, $request) {
                     $q->where('api_token_id', $apiTokenId)
-                      ->orWhere('datos_adicionales->entidad_recaudadora', $request->entidad_nombre);
+                      ->orWhere('entidad_recaudadora', $request->entidad_nombre);
                 })
+                ->with('transaccionPago')
                 ->whereBetween('created_at', [$desde, $hasta])
                 ->orderBy('created_at', 'asc')
                 ->get();
@@ -568,18 +612,19 @@ class BancaController extends Controller
             $pendientes = $pagos->where('estado', 'pendiente');
             $fallidos = $pagos->where('estado', 'fallido');
 
-            // Detalle de cada pago
-            $detalle = $pagos->map(function ($pago) {
+            // Detalle de cada pago (comprobante y referencia salen de la
+            // transacción — compartidos entre todos los años de un mismo pago).
+            $detalle = $pagos->map(function ($d) {
                 return [
-                    'pago_id' => $pago->id,
-                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'placa' => $pago->placa,
-                    'anio_fiscal' => $pago->anio_fiscal,
-                    'monto_total' => round((float) $pago->monto_total, 2),
-                    'estado' => $pago->estado,
-                    'referencia_pago' => $pago->referencia_pago,
-                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
-                    'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
+                    'pago_id' => $d->transaccionPago->id,
+                    'comprobante' => $d->transaccionPago->comprobante(),
+                    'placa' => $d->placa,
+                    'anio_fiscal' => $d->anio_fiscal,
+                    'monto_total' => round((float) $d->monto_total, 2),
+                    'estado' => $d->estado,
+                    'referencia_pago' => $d->transaccionPago->referencia_externa,
+                    'fecha_pago' => $d->transaccionPago->fecha_pago?->format('Y-m-d H:i:s'),
+                    'fecha_registro' => $d->created_at->format('Y-m-d H:i:s'),
                 ];
             });
 
