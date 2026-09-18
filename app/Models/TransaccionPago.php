@@ -37,6 +37,7 @@ class TransaccionPago extends Model
 
     protected $fillable = [
         'placa',
+        'canal',
         'referencia_externa',
         'codigo_consulta',
         'consulta_bancaria_id',

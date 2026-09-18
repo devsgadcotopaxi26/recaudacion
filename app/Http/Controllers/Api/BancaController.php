@@ -329,6 +329,7 @@ class BancaController extends Controller
             ) {
                 $transaccion = TransaccionPago::create([
                     'placa' => $placa,
+                    'canal' => 'banco',
                     'referencia_externa' => $request->referencia_externa,
                     'codigo_consulta' => $consulta->codigo_consulta,
                     'consulta_bancaria_id' => $consulta->id,

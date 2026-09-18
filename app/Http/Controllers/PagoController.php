@@ -139,6 +139,7 @@ class PagoController extends Controller
             $transaccion = DB::transaction(function () use ($placa, $impuestoReal, $request) {
                 $transaccion = TransaccionPago::create([
                     'placa' => $placa,
+                    'canal' => 'pasarela_ciudadana',
                     'monto_total' => $impuestoReal, // Usar valor recalculado
                     'estado' => 'pendiente',
                     'datos_facturacion' => [
