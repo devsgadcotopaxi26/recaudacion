@@ -156,13 +156,31 @@ class BancaController extends Controller
             'monto' => 'required|numeric|min:0.01',
             'codigo_consulta' => 'required|string|max:30',
             'referencia_externa' => 'required|string|max:100',
-            'fecha_pago' => 'required|date',
-            'entidad_recaudadora' => 'required|string|max:100',
+            // Informativa (lo que el banco reporta que cobró) — nunca fuente
+            // de verdad para mora/ventana de codigo_consulta/conciliación,
+            // eso sigue siendo siempre created_at (ver comentario más abajo,
+            // junto a la creación de la transacción). Rango: no futura, no
+            // más vieja que 48h desde el momento del registro — evita que
+            // un banco reporte una fecha arbitraria/absurda.
+            'fecha_pago' => [
+                'required',
+                'date',
+                'before_or_equal:now',
+                'after_or_equal:' . now()->subHours(48)->toDateTimeString(),
+            ],
+            // Ya NO se usa como fuente de verdad de la entidad (ver más abajo:
+            // se toma siempre de $request->entidad_nombre, inyectado por
+            // ValidateApiToken desde el token autenticado). Se acepta si el
+            // banco lo sigue mandando, para no romper integraciones
+            // existentes, pero se ignora su valor.
+            'entidad_recaudadora' => 'nullable|string|max:100',
         ], [
             'placa.required' => 'La placa es obligatoria',
             'placa.max' => 'La placa no puede exceder los 10 caracteres',
             'placa.string' => 'El formato de la placa es inválido',
             'codigo_consulta.required' => 'El código de consulta es obligatorio. Primero consulte la deuda.',
+            'fecha_pago.before_or_equal' => 'La fecha de pago no puede ser futura.',
+            'fecha_pago.after_or_equal' => 'La fecha de pago no puede ser anterior a 48 horas desde el momento del registro. Si el pago es más antiguo, contacte soporte.',
         ]);
 
         if ($validator->fails()) {
@@ -315,9 +333,25 @@ class BancaController extends Controller
                     'codigo_consulta' => $consulta->codigo_consulta,
                     'consulta_bancaria_id' => $consulta->id,
                     'api_token_id' => $request->api_token_id,
-                    'entidad_recaudadora' => $request->entidad_recaudadora,
+                    // SIEMPRE la entidad real del token autenticado (inyectada
+                    // por ValidateApiToken, verificada contra api_tokens),
+                    // NUNCA el valor libre que el banco pueda mandar en
+                    // 'entidad_recaudadora' del body — confirmado con datos
+                    // reales que ese campo libre ya se usaba de forma
+                    // inconsistente con el token real (7 de 9 transacciones
+                    // de prueba tenían un nombre de entidad distinto al del
+                    // token que las creó). El campo del body se ignora.
+                    'entidad_recaudadora' => $request->entidad_nombre,
                     'monto_total' => round($monto, 2),
                     'estado' => 'pagado',
+                    // Informativa (lo que el banco reporta que cobró al
+                    // ciudadano), ya validada en rango (no futura, no más
+                    // vieja que 48h). NUNCA usar este campo para calcular
+                    // mora, la ventana de 24h de codigo_consulta, o filtrar
+                    // reportes de conciliación — esos tres SIEMPRE usan
+                    // `created_at` (server-side, inmutable, no lo controla el
+                    // banco). Si algún día necesitas tocar uno de esos tres
+                    // cálculos, created_at sigue siendo la fuente oficial.
                     'fecha_pago' => $request->fecha_pago,
                     'datos_adicionales' => [
                         'metodo_pago' => 'API_Bancaria',
@@ -357,7 +391,7 @@ class BancaController extends Controller
                 'transaccion_pago_id' => $transaccion->id,
                 'monto_total' => $monto,
                 'anios_pagados' => $aniosAPagar->pluck('anio')->toArray(),
-                'entidad' => $request->entidad_recaudadora,
+                'entidad' => $request->entidad_nombre,
                 'referencia' => $request->referencia_externa,
                 'codigo_consulta' => $consulta->codigo_consulta,
                 'api_token_id' => $request->api_token_id,
