@@ -75,6 +75,14 @@ class ConsultaApiController extends Controller
                 // Este es el valor que debe usarse para decidir si hay deuda.
                 'totales_pendientes' => $resultado['totales_pendientes'],
                 'metodo_sri'         => $resultado['metodo_sri'],
+                // Previsualización de la respuesta pública real de
+                // consulta-deuda-rodaje-bancos, armada con el MISMO método que
+                // usa BancaController (formatearRespuestaPublica) — para que
+                // esta pantalla nunca muestre una forma distinta a la que un
+                // banco realmente recibe. codigo_consulta va null: esta
+                // previsualización no genera ni persiste una ConsultaBancaria
+                // real (eso solo lo hace la API bancaria de verdad).
+                'respuesta_api_banco' => $this->deudaService->formatearRespuestaPublica($resultado, null),
             ]);
 
         } catch (\Throwable $e) {

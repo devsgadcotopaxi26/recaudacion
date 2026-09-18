@@ -54,4 +54,40 @@ class DeudaVehicularService
             'metodo_sri' => $datos['metodo_sri'] ?? 'deuda',
         ];
     }
+
+    /**
+     * Da forma al bloque 'data' exactamente como lo devuelve
+     * BancaController::consultarDeuda() al banco — único lugar donde se
+     * define esa forma, para que la previsualización del panel admin
+     * (ConsultaApiController, pantalla "Ver respuesta JSON de la API")
+     * no pueda divergir de la respuesta real sin que se note (ambos
+     * llaman a este método).
+     *
+     * Sin efectos secundarios: no genera código de consulta ni escribe
+     * auditoría — quien llama decide eso (BancaController sí lo hace,
+     * ConsultaApiController no, porque solo previsualiza).
+     */
+    public function formatearRespuestaPublica(array $resultado, ?string $codigoConsulta): array
+    {
+        $vehiculo = $resultado['vehiculo'];
+
+        return [
+            'codigo_consulta' => $codigoConsulta,
+            'placa' => $vehiculo['placa'],
+            'vehiculo' => [
+                'marca' => $vehiculo['marca'],
+                'modelo' => $vehiculo['modelo'],
+                'anio' => $vehiculo['anio'],
+                'tipo' => $vehiculo['clase'] ?? 'automovil',
+                'descripcion' => $vehiculo['descripcion_completa'] ?? '',
+            ],
+            'valor_matricula' => $resultado['valor_matricula'],
+            'todos_pagados' => $resultado['todos_pagados'],
+            'desglose_anual' => $resultado['desglose_anual'],
+            'totales' => $resultado['totales_pendientes'],
+            'nota' => $resultado['todos_pagados']
+                ? 'Todos los años están pagados. No hay deuda pendiente.'
+                : 'Use el codigo_consulta al registrar el pago. Válido por 24 horas.',
+        ];
+    }
 }

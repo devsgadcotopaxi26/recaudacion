@@ -49,16 +49,6 @@ class BancaController extends Controller
             $deudaService = new \App\Services\DeudaVehicularService(new \App\Services\SriVehiculoService());
             $resultado = $deudaService->consultar($placa);
 
-            // Nota: $resultado['desglose_anual'] ya viene conciliado por
-            // SriVehiculoService::conciliarPagosLocales() (fuente única de la
-            // regla "deuda pendiente = SRI menos pagos locales pagados"),
-            // porque DeudaVehicularService delega en ese método en vez de
-            // reimplementarlo — ver DeudaVehicularService::consultar().
-            $desgloseConEstado = $resultado['desglose_anual'];
-            $todosPagados = $resultado['todos_pagados'];
-
-            $vehiculo = $resultado['vehiculo'];
-
             // Registrar la consulta en la base de datos
             // ── Guardia: no grabar si el resultado es incoherente (deuda con $0) ──
             $metodoSri    = $resultado['metodo_sri'];
@@ -106,33 +96,16 @@ class BancaController extends Controller
                 'metodo' => $metodoSri,
             ]);
 
+            // Forma de 'data' definida en un único lugar
+            // (DeudaVehicularService::formatearRespuestaPublica) — también la
+            // usa ConsultaApiController para previsualizar en
+            // /admin/consulta-api, así ambas no pueden divergir sin que se note.
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'codigo_consulta' => $consultaRegistrada?->codigo_consulta ?? $codigoConsulta,
-                    'placa' => $vehiculo['placa'],
-                    'vehiculo' => [
-                        'marca' => $vehiculo['marca'],
-                        'modelo' => $vehiculo['modelo'],
-                        'anio' => $vehiculo['anio'],
-                        'tipo' => $vehiculo['clase'] ?? 'automovil',
-                        'descripcion' => $vehiculo['descripcion_completa'] ?? '',
-                    ],
-                    'valor_matricula' => $resultado['valor_matricula'],
-                    'todos_pagados' => $todosPagados,
-                    'desglose_anual' => $desgloseConEstado,
-                    // Único objeto de totales en el contrato público (compatibilidad con
-                    // el manual v1.0.0 ya entregado a bancos/cooperativas, que documenta
-                    // 'totales'). Es el NETO — ya descuenta pagos locales — no el bruto del
-                    // SRI: un banco solo necesita el monto real a cobrar, no tiene por qué
-                    // distinguir bruto/neto. 'totales_sri' y 'totales_pendientes' como
-                    // campos separados solo existen en el panel admin interno
-                    // (ConsultaApiController), nunca en esta respuesta pública.
-                    'totales' => $resultado['totales_pendientes'],
-                    'nota' => $todosPagados
-                        ? 'Todos los años están pagados. No hay deuda pendiente.'
-                        : 'Use el codigo_consulta al registrar el pago. Válido por 24 horas.',
-                ]
+                'data' => $deudaService->formatearRespuestaPublica(
+                    $resultado,
+                    $consultaRegistrada?->codigo_consulta ?? $codigoConsulta
+                ),
             ], 200);
 
         } catch (\Throwable $e) {

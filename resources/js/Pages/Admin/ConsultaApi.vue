@@ -254,6 +254,31 @@
             </p>
           </div>
 
+          <!-- Encabezado de sección: deja claro que el desglose bruto/neto que
+               sigue (tarjetas + tabla por año) es auditoría interna, NO la
+               respuesta que recibe el banco (esa está en "Ver respuesta JSON
+               de la API", más abajo). -->
+          <div class="flex items-center gap-2 pt-2">
+            <svg
+              class="w-4 h-4 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 17v-2a4 4 0 014-4h3m0 0l-3-3m3 3l-3 3M4 7v10a2 2 0 002 2h9a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-4.414-4.414A1 1 0 0011.586 4H6a2 2 0 00-2 2z"
+              />
+            </svg>
+            <h3
+              class="text-xs font-bold text-gray-500 uppercase tracking-widest"
+            >
+              Desglose interno de auditoría — no es la respuesta enviada al banco
+            </h3>
+          </div>
+
           <!-- Totales -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div
@@ -355,7 +380,12 @@
                   d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                 />
               </svg>
-              <h3 class="font-bold text-gray-800">Desglose por Año Fiscal</h3>
+              <div>
+                <h3 class="font-bold text-gray-800">Desglose por Año Fiscal</h3>
+                <p class="text-xs text-gray-400">
+                  Auditoría interna — no es la respuesta enviada al banco
+                </p>
+              </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -577,18 +607,14 @@ const resultado = computed(() => page.props.flash?.resultado ?? null);
 // ── JSON formateado ───────────────────────────────────────
 const jsonFormateado = computed(() => {
   if (!resultado.value || !resultado.value.success) return "";
+  // Misma forma exacta que devuelve BancaController::consultarDeuda() al
+  // banco (armada en el backend con DeudaVehicularService::
+  // formatearRespuestaPublica) — nunca se construye por separado aquí, así
+  // esta previsualización no puede divergir de la respuesta real.
   return JSON.stringify(
     {
       success: true,
-      data: {
-        placa: resultado.value.placa,
-        vehiculo: resultado.value.vehiculo,
-        valor_matricula: resultado.value.valor_matricula,
-        todos_pagados: resultado.value.todos_pagados,
-        desglose_anual: resultado.value.desglose_anual,
-        totales_brutos: resultado.value.totales_brutos,
-        totales_pendientes: resultado.value.totales_pendientes,
-      },
+      data: resultado.value.respuesta_api_banco,
     },
     null,
     2,
