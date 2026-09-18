@@ -491,10 +491,22 @@ class SriVehiculoService
 
             $data = $response->json();
 
-            Log::channel('sri')->info('SRI: Response HistorialPagos JSON', [
-                'placa' => $placa,
-                'body' => $data
-            ]);
+            // Una falla del logger (permisos, disco lleno, etc.) NO debe
+            // interrumpir una respuesta válida del SRI ni hacer que este
+            // método devuelva [] como si el SRI no tuviera historial (caso
+            // real confirmado: PCN2626, 500 causado por un fallo de
+            // permisos del log, no por falta de datos).
+            try {
+                Log::channel('sri')->info('SRI: Response HistorialPagos JSON', [
+                    'placa' => $placa,
+                    'body' => $data
+                ]);
+            } catch (\Throwable $logError) {
+                Log::warning('SRI: No se pudo escribir el log detallado de historial de pagos (no afecta el resultado)', [
+                    'placa' => $placa,
+                    'error' => $logError->getMessage(),
+                ]);
+            }
 
             return $data['data'] ?? [];
         } catch (\Exception $e) {
@@ -558,10 +570,20 @@ class SriVehiculoService
 
             $data = $response->json();
 
-            Log::channel('sri')->info('SRI: Response DetallesPago JSON', [
-                'codigoRecaudacion' => $codigoRecaudacion,
-                'body' => $data
-            ]);
+            // Ver comentario equivalente en obtenerHistorialPagos(): un fallo
+            // de logging no debe hacer que este método devuelva [] como si
+            // el SRI no tuviera el detalle del pago.
+            try {
+                Log::channel('sri')->info('SRI: Response DetallesPago JSON', [
+                    'codigoRecaudacion' => $codigoRecaudacion,
+                    'body' => $data
+                ]);
+            } catch (\Throwable $logError) {
+                Log::warning('SRI: No se pudo escribir el log detallado de detalles de pago (no afecta el resultado)', [
+                    'codigoRecaudacion' => $codigoRecaudacion,
+                    'error' => $logError->getMessage(),
+                ]);
+            }
 
             return $data['data'] ?? [];
         } catch (\Exception $e) {
