@@ -333,16 +333,14 @@ class BancaController extends Controller
                     'referencia_externa' => $request->referencia_externa,
                     'codigo_consulta' => $consulta->codigo_consulta,
                     'consulta_bancaria_id' => $consulta->id,
+                    // La entidad se identifica SIEMPRE vía esta FK (token
+                    // autenticado, inyectado por ValidateApiToken, verificado
+                    // contra api_tokens) — no se guarda texto libre. El campo
+                    // 'entidad_recaudadora' que el banco pueda seguir
+                    // mandando en el body se acepta pero se ignora (ver regla
+                    // del Validator más arriba); el nombre real siempre sale
+                    // de TransaccionPago::nombreEntidad().
                     'api_token_id' => $request->api_token_id,
-                    // SIEMPRE la entidad real del token autenticado (inyectada
-                    // por ValidateApiToken, verificada contra api_tokens),
-                    // NUNCA el valor libre que el banco pueda mandar en
-                    // 'entidad_recaudadora' del body — confirmado con datos
-                    // reales que ese campo libre ya se usaba de forma
-                    // inconsistente con el token real (7 de 9 transacciones
-                    // de prueba tenían un nombre de entidad distinto al del
-                    // token que las creó). El campo del body se ignora.
-                    'entidad_recaudadora' => $request->entidad_nombre,
                     'monto_total' => round($monto, 2),
                     'estado' => 'pagado',
                     // Informativa (lo que el banco reporta que cobró al
@@ -512,7 +510,7 @@ class BancaController extends Controller
                 ], 404);
             }
 
-            $transaccion->loadMissing('detalles');
+            $transaccion->loadMissing(['detalles', 'apiToken']);
 
             Log::info('API: Verificación de pago consultada', [
                 'transaccion_pago_id' => $transaccion->id,
@@ -551,7 +549,7 @@ class BancaController extends Controller
                     'referencia_pago' => $transaccion->referencia_externa,
                     'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
                     'fecha_registro' => $transaccion->created_at->format('Y-m-d H:i:s'),
-                    'entidad_recaudadora' => $transaccion->entidad_recaudadora,
+                    'entidad_recaudadora' => $transaccion->nombreEntidad(),
                 ]
             ], 200);
 
@@ -603,12 +601,11 @@ class BancaController extends Controller
             $apiTokenId = $request->api_token_id;
 
             // Consultar los detalles (una fila por año-detalle, igual que
-            // antes) de ESTA entidad en el rango de fechas. Busca por
-            // api_token_id (nuevo) O por entidad_recaudadora (retrocompatibilidad)
-            // — ambos viven en la cabecera transacciones_pago.
-            $pagos = PagoDetalle::whereHas('transaccionPago', function ($q) use ($apiTokenId, $request) {
-                    $q->where('api_token_id', $apiTokenId)
-                      ->orWhere('entidad_recaudadora', $request->entidad_nombre);
+            // antes) de ESTA entidad en el rango de fechas. api_token_id es
+            // la única fuente de verdad de "de quién es esta transacción"
+            // (cada entidad tiene siempre un único token por ambiente).
+            $pagos = PagoDetalle::whereHas('transaccionPago', function ($q) use ($apiTokenId) {
+                    $q->where('api_token_id', $apiTokenId);
                 })
                 ->with('transaccionPago')
                 ->whereBetween('created_at', [$desde, $hasta])

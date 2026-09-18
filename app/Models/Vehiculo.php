@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Vehiculo extends Model
 {
@@ -27,14 +26,6 @@ class Vehiculo extends Model
         'valor_matricula' => 'decimal:2',
         'anio' => 'integer',
     ];
-
-    /**
-     * Relación con pagos
-     */
-    public function pagos(): HasMany
-    {
-        return $this->hasMany(Pago::class);
-    }
 
     /**
      * Calcular el impuesto al rodaje según el valor de matrícula
@@ -69,32 +60,6 @@ class Vehiculo extends Model
     public function getTotalAPagar(): float
     {
         return $this->calcularImpuesto();
-    }
-
-    /**
-     * Verificar si tiene pagos pendientes del año actual
-     */
-    public function tienePagoPendiente(int $anio = null): bool
-    {
-        $anio = $anio ?? date('Y');
-
-        return $this->pagos()
-            ->where('anio_fiscal', $anio)
-            ->where('estado', 'pendiente')
-            ->exists();
-    }
-
-    /**
-     * Verificar si ya pagó el impuesto del año
-     */
-    public function yaPago(int $anio = null): bool
-    {
-        $anio = $anio ?? date('Y');
-
-        return $this->pagos()
-            ->where('anio_fiscal', $anio)
-            ->where('estado', 'pagado')
-            ->exists();
     }
 
     /**

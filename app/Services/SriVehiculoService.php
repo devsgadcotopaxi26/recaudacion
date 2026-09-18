@@ -1022,7 +1022,7 @@ class SriVehiculoService
         // (el más transitado del sistema, corre en cada consulta de deuda).
         $pagosExistentes = PagoDetalle::where('placa', $placa)
             ->where('estado', 'pagado')
-            ->with('transaccionPago')
+            ->with('transaccionPago.apiToken')
             ->get()
             ->keyBy('anio_fiscal');
 
@@ -1040,7 +1040,7 @@ class SriVehiculoService
                     'registro_historico' => is_null($transaccion->codigo_consulta),
                     'referencia' => $transaccion->referencia_externa,
                     'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
-                    'entidad' => $transaccion->entidad_recaudadora,
+                    'entidad' => $transaccion->nombreEntidad(),
                 ];
             }
 
