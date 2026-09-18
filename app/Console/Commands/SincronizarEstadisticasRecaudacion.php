@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Pago;
+use App\Models\PagoDetalle;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Redis;
 
@@ -29,8 +29,9 @@ class SincronizarEstadisticasRecaudacion extends Command
     {
         $this->info('🔄 Sincronizando estadísticas de recaudación...');
 
-        // Obtener todos los pagos completados
-        $pagos = Pago::where('estado', 'pagado')->get();
+        // Obtener todos los pagos completados (un PagoDetalle por año-detalle,
+        // fecha_pago vive en la transacción/cabecera)
+        $pagos = PagoDetalle::where('estado', 'pagado')->with('transaccionPago')->get();
 
         if ($pagos->isEmpty()) {
             $this->warn('⚠️  No se encontraron pagos completados');
@@ -61,7 +62,8 @@ class SincronizarEstadisticasRecaudacion extends Command
 
         foreach ($pagos as $pago) {
             $monto = floatval($pago->monto_total);
-            $fecha = $pago->fecha_pago ? $pago->fecha_pago->format('Y-m-d') : date('Y-m-d');
+            $fechaPago = $pago->transaccionPago?->fecha_pago;
+            $fecha = $fechaPago ? $fechaPago->format('Y-m-d') : date('Y-m-d');
 
             // Incrementar monto total
             $totalRecaudado += $monto;

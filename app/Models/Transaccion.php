@@ -14,6 +14,7 @@ class Transaccion extends Model
 
     protected $fillable = [
         'pago_id',
+        'transaccion_pago_id',
         'tipo',
         'datos_request',
         'datos_response',
@@ -28,7 +29,8 @@ class Transaccion extends Model
     ];
 
     /**
-     * Relación con pago
+     * Relación histórica — filas de log creadas antes de la reestructuración
+     * cabecera/detalle, ligadas a Pago (hoy `pagos_legacy`).
      */
     public function pago(): BelongsTo
     {
@@ -36,10 +38,19 @@ class Transaccion extends Model
     }
 
     /**
-     * Crear registro de transacción
+     * Relación vigente — filas de log nuevas, ligadas a TransaccionPago.
+     */
+    public function transaccionPago(): BelongsTo
+    {
+        return $this->belongsTo(TransaccionPago::class);
+    }
+
+    /**
+     * Crear registro de transacción (log de una llamada api_call/webhook/
+     * callback a la pasarela), ligado a la cabecera TransaccionPago.
      */
     public static function registrar(
-        ?int $pagoId,
+        ?int $transaccionPagoId,
         string $tipo,
         ?array $request,
         ?array $response,
@@ -47,7 +58,7 @@ class Transaccion extends Model
         ?string $mensaje = null
     ): self {
         return self::create([
-            'pago_id' => $pagoId,
+            'transaccion_pago_id' => $transaccionPagoId,
             'tipo' => $tipo,
             'datos_request' => $request,
             'datos_response' => $response,

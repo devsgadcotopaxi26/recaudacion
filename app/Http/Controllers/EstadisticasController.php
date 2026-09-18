@@ -19,14 +19,15 @@ class EstadisticasController extends Controller
      * Mostrar panel de estadísticas.
      *
      * Recaudación y Consultas de Vehículos se calculan en tiempo real desde
-     * las tablas reales (`pagos` y `consulta_bancarias`), reutilizando
-     * ConciliacionReporteService (la misma lógica que ya usa el Reporte de
-     * Conciliación) y el nuevo ConsultaEstadisticasService. Ya no dependen
-     * de los contadores `stats:*` de Redis, que solo se incrementaban desde
-     * el flujo ciudadano (VehiculoController / Pago::marcarComoPagado), un
-     * canal que en la práctica no genera los datos reales de este sistema
-     * (todo se creó vía la API bancaria). Esas llamadas a Redis se dejan
-     * intactas en su código original por si ese flujo llega a usarse.
+     * las tablas reales (`pago_detalles`/`transacciones_pago` y
+     * `consulta_bancarias`), reutilizando ConciliacionReporteService (la
+     * misma lógica que ya usa el Reporte de Conciliación) y el nuevo
+     * ConsultaEstadisticasService. Ya no dependen de los contadores
+     * `stats:*` de Redis, que solo se incrementaban desde el flujo
+     * ciudadano (VehiculoController / TransaccionPago::marcarComoPagado),
+     * un canal que en la práctica no genera los datos reales de este
+     * sistema (todo se creó vía la API bancaria). Esas llamadas a Redis se
+     * dejan intactas en su código original por si ese flujo llega a usarse.
      */
     public function index()
     {

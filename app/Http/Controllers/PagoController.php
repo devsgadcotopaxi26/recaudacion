@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Pago;
+use App\Models\TransaccionPago;
+use App\Models\PagoDetalle;
 use App\Models\Vehiculo;
 use App\Services\PaymentGatewayService;
 use App\Services\SriVehiculoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 class PagoController extends Controller
@@ -16,6 +18,33 @@ class PagoController extends Controller
         private PaymentGatewayService $paymentService,
         private SriVehiculoService $sriService
     ) {
+    }
+
+    /**
+     * Aplana una TransaccionPago (+ su único detalle, siempre exactamente 1
+     * año en el flujo de pasarela ciudadana) a la misma forma plana que
+     * antes tenía un Pago individual — para que las vistas Pago/*.vue
+     * (Procesar, Confirmacion, Comprobante, Certificado, Verificacion) no
+     * necesiten cambiar ni un campo.
+     */
+    private function aplanarTransaccion(TransaccionPago $transaccion): array
+    {
+        $detalle = $transaccion->detalles->first();
+
+        return [
+            'id' => $transaccion->id,
+            'placa' => $transaccion->placa,
+            'referencia_pago' => $transaccion->referencia_externa,
+            'certificado_token' => $transaccion->certificado_token,
+            'link_pago' => $transaccion->link_pago,
+            'estado' => $transaccion->estado,
+            'fecha_pago' => $transaccion->fecha_pago,
+            'anio_fiscal' => $detalle?->anio_fiscal,
+            'monto_impuesto' => $detalle?->monto_impuesto,
+            'monto_total' => $transaccion->monto_total,
+            'datos_facturacion' => $transaccion->datos_facturacion,
+            'created_at' => $transaccion->created_at,
+        ];
     }
 
     /**
@@ -32,13 +61,13 @@ class PagoController extends Controller
         $placa = strtoupper($request->placa);
 
         // Verificar si ya existe pago completado este año
-        $pagoPrevio = Pago::where('placa', $placa)
+        $detallePrevio = PagoDetalle::where('placa', $placa)
             ->where('anio_fiscal', date('Y'))
             ->where('estado', 'pagado')
             ->first();
 
-        if ($pagoPrevio) {
-            return redirect()->route('pago.comprobante', $pagoPrevio->id)
+        if ($detallePrevio) {
+            return redirect()->route('pago.comprobante', $detallePrevio->transaccion_pago_id)
                 ->with('info', 'Este vehículo ya pagó el impuesto este año.');
         }
 
@@ -85,48 +114,63 @@ class PagoController extends Controller
                 'impuesto' => $impuestoReal
             ]);
 
-            // Verificar si ya existe un pago pendiente
-            $pagoExistente = Pago::where('placa', $placa)
-                ->where('anio_fiscal', date('Y'))
+            // Verificar si ya existe un pago pendiente (año actual, vía su
+            // único detalle — la pasarela ciudadana siempre paga 1 año)
+            $transaccionExistente = TransaccionPago::whereHas('detalles', function ($q) {
+                    $q->where('anio_fiscal', date('Y'));
+                })
+                ->where('placa', $placa)
                 ->where('estado', 'pendiente')
                 ->first();
 
-            if ($pagoExistente && $pagoExistente->link_pago) {
+            if ($transaccionExistente && $transaccionExistente->link_pago) {
                 \Log::info('PagoController::procesar - Pago existente con link');
                 return Inertia::render('Pago/Procesar', [
-                    'link_pago' => $pagoExistente->link_pago,
-                    'pago' => $pagoExistente
+                    'link_pago' => $transaccionExistente->link_pago,
+                    'pago' => $this->aplanarTransaccion($transaccionExistente),
                 ]);
             }
 
-            // Crear nuevo pago con datos de facturación
+            // Crear nueva transacción (cabecera + 1 detalle: la pasarela
+            // ciudadana siempre paga exactamente el año en curso) con datos
+            // de facturación.
             \Log::info('PagoController::procesar - Creando pago');
 
-            $pago = Pago::create([
-                'vehiculo_id' => null,
-                'placa' => $placa,
-                'monto_impuesto' => $impuestoReal, // Usar valor recalculado
-                'monto_total' => $impuestoReal, // Usar valor recalculado
-                'estado' => 'pendiente',
-                'anio_fiscal' => date('Y'),
-                'datos_facturacion' => [
-                    'tipo_documento' => $request->tipo_documento,
-                    'documento' => $request->documento,
-                    'nombre' => $request->nombre,
-                    'email' => $request->email,
-                    'telefono' => $request->telefono,
-                    'direccion' => $request->direccion,
-                    // LOPDP Ecuador - Registro de consentimiento
-                    'consentimiento_proteccion_datos' => true,
-                    'consentimiento_fecha' => now()->toDateTimeString(),
-                    'consentimiento_ip' => $request->ip(),
-                ],
-            ]);
+            $transaccion = DB::transaction(function () use ($placa, $impuestoReal, $request) {
+                $transaccion = TransaccionPago::create([
+                    'placa' => $placa,
+                    'canal' => 'pasarela_ciudadana',
+                    'monto_total' => $impuestoReal, // Usar valor recalculado
+                    'estado' => 'pendiente',
+                    'datos_facturacion' => [
+                        'tipo_documento' => $request->tipo_documento,
+                        'documento' => $request->documento,
+                        'nombre' => $request->nombre,
+                        'email' => $request->email,
+                        'telefono' => $request->telefono,
+                        'direccion' => $request->direccion,
+                        // LOPDP Ecuador - Registro de consentimiento
+                        'consentimiento_proteccion_datos' => true,
+                        'consentimiento_fecha' => now()->toDateTimeString(),
+                        'consentimiento_ip' => $request->ip(),
+                    ],
+                ]);
 
-            \Log::info('PagoController::procesar - Pago creado', ['pago_id' => $pago->id]);
+                $transaccion->detalles()->create([
+                    'placa' => $placa,
+                    'estado' => 'pendiente',
+                    'anio_fiscal' => date('Y'),
+                    'monto_impuesto' => $impuestoReal,
+                    'monto_total' => $impuestoReal,
+                ]);
+
+                return $transaccion;
+            });
+
+            \Log::info('PagoController::procesar - Pago creado', ['transaccion_pago_id' => $transaccion->id]);
 
             // Generar link de pago
-            $resultado = $this->paymentService->generarLinkPago($pago);
+            $resultado = $this->paymentService->generarLinkPago($transaccion);
 
             \Log::info('PagoController::procesar - Resultado', ['success' => $resultado['success']]);
 
@@ -138,7 +182,7 @@ class PagoController extends Controller
             // Renderizar página de procesamiento
             return Inertia::render('Pago/Procesar', [
                 'link_pago' => $resultado['link_pago'],
-                'pago' => $pago
+                'pago' => $this->aplanarTransaccion($transaccion->fresh('detalles')),
             ]);
 
         } catch (\Exception $e) {
@@ -151,119 +195,36 @@ class PagoController extends Controller
     }
 
     /**
-     * Método iniciar eliminado - reemplazado por facturacion() y procesar()
-     */
-
-    /**
-     * Iniciar proceso de pago con datos del SRI
-     */
-    public function iniciar(Request $request)
-    {
-        \Log::info('PagoController::iniciar - Inicio', ['request' => $request->all()]);
-
-        $request->validate([
-            'placa' => 'required|string|max:10',
-            'valor_matricula' => 'required|numeric|min:0',
-            'impuesto' => 'required|numeric|min:0',
-        ]);
-
-        \Log::info('PagoController::iniciar - Validación exitosa');
-
-        $placa = strtoupper($request->placa);
-
-        try {
-            // Verificar si ya existe un pago pendiente para este vehículo este año
-            $pagoExistente = Pago::where('placa', $placa)
-                ->where('anio_fiscal', date('Y'))
-                ->where('estado', 'pendiente')
-                ->first();
-
-            \Log::info('PagoController::iniciar - Pago existente', ['existe' => $pagoExistente ? 'sí' : 'no']);
-
-            // Si ya tiene link de pago, redirigir directamente
-            if ($pagoExistente && $pagoExistente->link_pago) {
-                \Log::info('PagoController::iniciar - Redirigiendo a pago existente');
-                return Inertia::render('Pago/Procesar', [
-                    'link_pago' => $pagoExistente->link_pago,
-                    'pago' => $pagoExistente
-                ]);
-            }
-
-            // Crear nuevo registro de pago (sin vehiculo_id porque no tenemos modelo)
-            \Log::info('PagoController::iniciar - Creando nuevo pago');
-
-            $pago = Pago::create([
-                'vehiculo_id' => null, // Ya no usamos ID de vehículo
-                'placa' => $placa,
-                'monto_impuesto' => floatval($request->impuesto),
-                'monto_total' => floatval($request->impuesto),
-                'estado' => 'pendiente',
-                'anio_fiscal' => date('Y'),
-            ]);
-
-            \Log::info('PagoController::iniciar - Pago creado', ['pago_id' => $pago->id]);
-
-            // Generar link de pago en la pasarela
-            \Log::info('PagoController::iniciar - Generando link de pago');
-
-            $resultado = $this->paymentService->generarLinkPago($pago);
-
-            \Log::info('PagoController::iniciar - Resultado del servicio', ['resultado' => $resultado]);
-
-            if (!$resultado['success']) {
-                \Log::error('PagoController::iniciar - Error en generación de link', ['mensaje' => $resultado['message'] ?? 'Sin mensaje']);
-                return redirect()->back()->with('error', $resultado['message'] ?? 'Error al generar el link de pago');
-            }
-
-            // Renderizar página de procesamiento
-            \Log::info('PagoController::iniciar - Renderizando página Pago/Procesar');
-
-            return Inertia::render('Pago/Procesar', [
-                'link_pago' => $resultado['link_pago'],
-                'pago' => $pago
-            ]);
-
-        } catch (\Exception $e) {
-            \Log::error('PagoController::iniciar - Excepción capturada', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            return redirect()->back()->with('error', 'Error al iniciar el pago: ' . $e->getMessage());
-        }
-    }
-
-    /**
      * Callback cuando el usuario vuelve de la pasarela
      */
     public function callback(Request $request)
     {
         $pagoId = $request->query('pago_id');
-        $referencia = $request->query('referencia');
 
         if (!$pagoId) {
             return redirect()->route('home')->with('error', 'No se pudo verificar el pago');
         }
 
-        $pago = Pago::find($pagoId);
+        $transaccion = TransaccionPago::with('detalles')->find($pagoId);
 
-        if (!$pago) {
+        if (!$transaccion) {
             return redirect()->route('home')->with('error', 'Pago no encontrado');
         }
 
         // En modo de prueba, marcar como pagado automáticamente
         if ($request->query('test') === '1') {
-            $pago->marcarComoPagado('TEST-' . time());
+            $transaccion->marcarComoPagado('TEST-' . time());
         }
 
         // Obtener datos del vehículo desde el SRI
         try {
-            $datosVehiculo = $this->sriService->obtenerDetalleCompleto($pago->placa);
+            $datosVehiculo = $this->sriService->obtenerDetalleCompleto($transaccion->placa);
         } catch (\Exception $e) {
-            $datosVehiculo = ['numeroPlaca' => $pago->placa];
+            $datosVehiculo = ['numeroPlaca' => $transaccion->placa];
         }
 
         return Inertia::render('Pago/Confirmacion', [
-            'pago' => $pago,
+            'pago' => $this->aplanarTransaccion($transaccion->fresh('detalles')),
             'vehiculo' => $datosVehiculo
         ]);
     }
@@ -271,8 +232,10 @@ class PagoController extends Controller
     /**
      * Mostrar confirmación de pago
      */
-    public function confirmacion(Pago $pago)
+    public function confirmacion(TransaccionPago $pago)
     {
+        $pago->loadMissing('detalles');
+
         // Obtener datos del vehículo desde el SRI
         try {
             $datosVehiculo = $this->sriService->obtenerDetalleCompleto($pago->placa);
@@ -281,7 +244,7 @@ class PagoController extends Controller
         }
 
         return Inertia::render('Pago/Confirmacion', [
-            'pago' => $pago,
+            'pago' => $this->aplanarTransaccion($pago),
             'vehiculo' => $datosVehiculo
         ]);
     }
@@ -289,12 +252,14 @@ class PagoController extends Controller
     /**
      * Descargar comprobante de pago
      */
-    public function comprobante(Pago $pago)
+    public function comprobante(TransaccionPago $pago)
     {
         if (!$pago->estaPagado()) {
             return redirect()->route('home')
                 ->with('error', 'El comprobante solo está disponible para pagos completados');
         }
+
+        $pago->loadMissing('detalles');
 
         // Cachear datos del comprobante (30 días)
         $cacheKey = "comprobante:pago:{$pago->id}";
@@ -322,7 +287,7 @@ class PagoController extends Controller
             }
 
             return [
-                'pago' => $pago,
+                'pago' => $this->aplanarTransaccion($pago),
                 'vehiculo' => $vehiculo
             ];
         });
@@ -337,12 +302,14 @@ class PagoController extends Controller
      */
     public function certificado(string $token)
     {
-        $pago = Pago::where('certificado_token', $token)->first();
+        $pago = TransaccionPago::where('certificado_token', $token)->first();
 
         if (!$pago || !$pago->estaPagado()) {
             return redirect()->route('vehiculos.consultar')
                 ->with('error', 'Certificado no encontrado o el pago no está completado.');
         }
+
+        $pago->loadMissing('detalles');
 
         $cacheKey = "certificado:pago:{$pago->id}";
 
@@ -366,9 +333,18 @@ class PagoController extends Controller
             }
 
             return [
-                'pago' => $pago,
+                // Certificado = una transacción, con su desglose de años
+                // adentro (uno solo en el flujo de pasarela ciudadana, hasta
+                // varios en un pago bancario consolidado).
+                'pago' => $this->aplanarTransaccion($pago),
+                'detalles' => $pago->detalles->map(fn($d) => [
+                    'anio_fiscal' => $d->anio_fiscal,
+                    'monto_impuesto' => (float) $d->monto_impuesto,
+                    'monto_mora' => (float) $d->monto_mora,
+                    'monto_total' => (float) $d->monto_total,
+                ])->values(),
                 'vehiculo' => $vehiculo,
-                'entidad_recaudadora' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+                'entidad_recaudadora' => $pago->entidad_recaudadora,
             ];
         });
 
@@ -382,7 +358,7 @@ class PagoController extends Controller
     {
         try {
             // Buscar pago por referencia
-            $pago = Pago::where('referencia_pago', $referencia)->first();
+            $pago = TransaccionPago::where('referencia_externa', $referencia)->first();
 
             if (!$pago) {
                 return Inertia::render('Pago/Verificacion', [
@@ -408,7 +384,7 @@ class PagoController extends Controller
                 'mensaje' => '✓ Comprobante Auténtico Verificado',
                 'pago' => [
                     'id' => $pago->id,
-                    'referencia' => $pago->referencia_pago,
+                    'referencia' => $pago->referencia_externa,
                     'placa' => $pago->placa,
                     'monto' => $pago->monto_total,
                     'fecha' => $pago->fecha_pago,

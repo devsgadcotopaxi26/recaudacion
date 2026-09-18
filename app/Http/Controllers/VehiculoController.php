@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Vehiculo;
+use App\Models\PagoDetalle;
 use App\Services\SriVehiculoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -50,10 +50,12 @@ class VehiculoController extends Controller
 
             // Verificar si ya existe un pago completado para este año fiscal
             $anioActual = date('Y');
-            $pagoPrevio = \App\Models\Pago::where('placa', $placa)
+            $detallePrevio = PagoDetalle::where('placa', $placa)
                 ->where('anio_fiscal', $anioActual)
                 ->where('estado', 'pagado')
+                ->with('transaccionPago')
                 ->first();
+            $transaccionPrevia = $detallePrevio?->transaccionPago;
 
             // Retornar con formato correcto para el frontend
             // El frontend espera todos los datos en un solo objeto 'vehiculo'
@@ -69,13 +71,13 @@ class VehiculoController extends Controller
                     ]
                 ),
                 'pasarela_habilitada' => config('pagos.pasarela_ciudadana_habilitada'),
-                'ya_pagado' => $pagoPrevio ? true : false,
-                'pago_existente' => $pagoPrevio ? [
-                    'id' => $pagoPrevio->id,
-                    'referencia' => $pagoPrevio->referencia_pago,
-                    'certificado_token' => $pagoPrevio->certificado_token,
-                    'fecha' => $pagoPrevio->fecha_pago,
-                    'monto' => $pagoPrevio->monto_total,
+                'ya_pagado' => $transaccionPrevia ? true : false,
+                'pago_existente' => $transaccionPrevia ? [
+                    'id' => $transaccionPrevia->id,
+                    'referencia' => $transaccionPrevia->referencia_externa,
+                    'certificado_token' => $transaccionPrevia->certificado_token,
+                    'fecha' => $transaccionPrevia->fecha_pago,
+                    'monto' => $detallePrevio->monto_total,
                 ] : null,
                 'anio_actual' => $anioActual,
             ]);

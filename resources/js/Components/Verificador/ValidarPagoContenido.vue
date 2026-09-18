@@ -202,6 +202,37 @@
           </div>
         </div>
 
+        <!-- Desglose de años (pagos que cubren más de un año fiscal en una
+             sola transacción — comprobante único, ver TransaccionPago) -->
+        <div
+          v-if="pagoEncontrado.detalles && pagoEncontrado.detalles.length > 1"
+          class="mt-6 pt-6 border-t border-gray-200"
+        >
+          <h4 class="text-lg font-semibold text-gray-900 mb-4">
+            Años cubiertos por este comprobante ({{ pagoEncontrado.detalles.length }})
+          </h4>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 text-xs uppercase text-gray-500 tracking-wider font-semibold">
+                <tr>
+                  <th class="px-4 py-2 text-left">Año</th>
+                  <th class="px-4 py-2 text-right">Rodaje</th>
+                  <th class="px-4 py-2 text-right">Mora</th>
+                  <th class="px-4 py-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr v-for="d in pagoEncontrado.detalles" :key="d.anio_fiscal">
+                  <td class="px-4 py-2 font-semibold text-gray-900">{{ d.anio_fiscal }}</td>
+                  <td class="px-4 py-2 text-right">${{ formatMoney(d.monto_impuesto) }}</td>
+                  <td class="px-4 py-2 text-right">${{ formatMoney(d.monto_mora) }}</td>
+                  <td class="px-4 py-2 text-right font-bold">${{ formatMoney(d.monto_total) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Datos de Facturación -->
         <div v-if="pagoEncontrado.datos_facturacion" class="mt-6 pt-6 border-t border-gray-200">
           <h4 class="text-lg font-semibold text-gray-900 mb-4">Datos del Pago</h4>

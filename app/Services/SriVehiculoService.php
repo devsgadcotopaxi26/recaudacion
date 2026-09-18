@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use App\Models\SriRequest;
-use App\Models\Pago;
+use App\Models\PagoDetalle;
 use Exception;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException as HttpRequestException;
@@ -491,10 +491,22 @@ class SriVehiculoService
 
             $data = $response->json();
 
-            Log::channel('sri')->info('SRI: Response HistorialPagos JSON', [
-                'placa' => $placa,
-                'body' => $data
-            ]);
+            // Una falla del logger (permisos, disco lleno, etc.) NO debe
+            // interrumpir una respuesta válida del SRI ni hacer que este
+            // método devuelva [] como si el SRI no tuviera historial (caso
+            // real confirmado: PCN2626, 500 causado por un fallo de
+            // permisos del log, no por falta de datos).
+            try {
+                Log::channel('sri')->info('SRI: Response HistorialPagos JSON', [
+                    'placa' => $placa,
+                    'body' => $data
+                ]);
+            } catch (\Throwable $logError) {
+                Log::warning('SRI: No se pudo escribir el log detallado de historial de pagos (no afecta el resultado)', [
+                    'placa' => $placa,
+                    'error' => $logError->getMessage(),
+                ]);
+            }
 
             return $data['data'] ?? [];
         } catch (\Exception $e) {
@@ -558,10 +570,20 @@ class SriVehiculoService
 
             $data = $response->json();
 
-            Log::channel('sri')->info('SRI: Response DetallesPago JSON', [
-                'codigoRecaudacion' => $codigoRecaudacion,
-                'body' => $data
-            ]);
+            // Ver comentario equivalente en obtenerHistorialPagos(): un fallo
+            // de logging no debe hacer que este método devuelva [] como si
+            // el SRI no tuviera el detalle del pago.
+            try {
+                Log::channel('sri')->info('SRI: Response DetallesPago JSON', [
+                    'codigoRecaudacion' => $codigoRecaudacion,
+                    'body' => $data
+                ]);
+            } catch (\Throwable $logError) {
+                Log::warning('SRI: No se pudo escribir el log detallado de detalles de pago (no afecta el resultado)', [
+                    'codigoRecaudacion' => $codigoRecaudacion,
+                    'error' => $logError->getMessage(),
+                ]);
+            }
 
             return $data['data'] ?? [];
         } catch (\Exception $e) {
@@ -869,7 +891,7 @@ class SriVehiculoService
                     // 3) Limitación conocida: si tampoco hay esa señal (SRI no la reportó,
                     //    valor 0), no queda ningún dato real para acotar el rango — se
                     //    calcula únicamente el año actual como candidato mínimo.
-                    $maxAnioPagadoLocal = Pago::where('placa', $placa)
+                    $maxAnioPagadoLocal = PagoDetalle::where('placa', $placa)
                         ->where('estado', 'pagado')
                         ->max('anio_fiscal');
 
@@ -995,27 +1017,30 @@ class SriVehiculoService
     {
         $placa = strtoupper($placa);
 
-        // Todos los pagos 'pagado' de esta placa, indexados por año fiscal
-        $pagosExistentes = Pago::where('placa', $placa)
+        // Todos los detalles 'pagado' de esta placa, indexados por año fiscal.
+        // placa/estado desnormalizados en PagoDetalle → sin JOIN en este path
+        // (el más transitado del sistema, corre en cada consulta de deuda).
+        $pagosExistentes = PagoDetalle::where('placa', $placa)
             ->where('estado', 'pagado')
+            ->with('transaccionPago')
             ->get()
             ->keyBy('anio_fiscal');
 
         $desgloseConEstado = collect($desgloseAnual)->map(function ($anio) use ($pagosExistentes) {
-            $pago = $pagosExistentes->get($anio['anio']);
-            $anio['estado'] = $pago ? 'pagado' : 'pendiente';
+            $detalle = $pagosExistentes->get($anio['anio']);
+            $anio['estado'] = $detalle ? 'pagado' : 'pendiente';
 
-            if ($pago) {
-                $codigoConsultaPago = $pago->datos_adicionales['codigo_consulta'] ?? null;
+            if ($detalle) {
+                $transaccion = $detalle->transaccionPago;
                 $anio['pago'] = [
-                    'pago_id' => $pago->id,
-                    'comprobante' => 'PAG-' . str_pad($pago->id, 6, '0', STR_PAD_LEFT),
-                    'codigo_consulta' => $codigoConsultaPago,
+                    'pago_id' => $transaccion->id,
+                    'comprobante' => $transaccion->comprobante(),
+                    'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
-                    'registro_historico' => is_null($codigoConsultaPago),
-                    'referencia' => $pago->referencia_pago,
-                    'fecha_pago' => $pago->fecha_pago?->format('Y-m-d H:i:s'),
-                    'entidad' => $pago->datos_adicionales['entidad_recaudadora'] ?? null,
+                    'registro_historico' => is_null($transaccion->codigo_consulta),
+                    'referencia' => $transaccion->referencia_externa,
+                    'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
+                    'entidad' => $transaccion->entidad_recaudadora,
                 ];
             }
 
