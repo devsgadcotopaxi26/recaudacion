@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\TransaccionPago;
 use App\Models\PagoDetalle;
-use App\Models\Vehiculo;
 use App\Services\PaymentGatewayService;
 use App\Services\SriVehiculoService;
 use Illuminate\Http\Request;

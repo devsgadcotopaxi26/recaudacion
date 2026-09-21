@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Vehiculo;
 use App\Models\TransaccionPago;
 use App\Models\PagoDetalle;
 use Illuminate\Http\Request;
