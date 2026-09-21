@@ -22,6 +22,8 @@
 !/storage/framework/views/.gitignore
 !/storage/framework/testing/.gitignore
 
+docker-compose.override.yml
+
 .env
 .env.backup
 .env.production
