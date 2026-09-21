@@ -309,7 +309,7 @@ class PagoController extends Controller
                 ->with('error', 'Certificado no encontrado o el pago no está completado.');
         }
 
-        $pago->loadMissing('detalles');
+        $pago->loadMissing(['detalles', 'apiToken']);
 
         $cacheKey = "certificado:pago:{$pago->id}";
 
@@ -344,7 +344,7 @@ class PagoController extends Controller
                     'monto_total' => (float) $d->monto_total,
                 ])->values(),
                 'vehiculo' => $vehiculo,
-                'entidad_recaudadora' => $pago->entidad_recaudadora,
+                'entidad_recaudadora' => $pago->nombreEntidad(),
             ];
         });
 

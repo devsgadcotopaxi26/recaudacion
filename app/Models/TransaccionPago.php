@@ -42,7 +42,6 @@ class TransaccionPago extends Model
         'codigo_consulta',
         'consulta_bancaria_id',
         'api_token_id',
-        'entidad_recaudadora',
         'monto_total',
         'estado',
         'fecha_pago',
@@ -72,6 +71,23 @@ class TransaccionPago extends Model
     public function consultaBancaria(): BelongsTo
     {
         return $this->belongsTo(ConsultaBancaria::class, 'consulta_bancaria_id', 'id');
+    }
+
+    /**
+     * Nombre de la entidad para mostrar en reportes/certificados. Sin
+     * columna propia: se resuelve siempre vía la FK api_token_id (fuente
+     * de verdad real, ya no hay texto libre duplicado). Canal
+     * 'pasarela_ciudadana' no tiene api_token_id (el ciudadano paga
+     * directo, sin entidad bancaria de por medio) — valor explícito en
+     * vez de dejar pasar null sin manejar.
+     */
+    public function nombreEntidad(): string
+    {
+        if ($this->canal === 'pasarela_ciudadana') {
+            return 'Pago en línea';
+        }
+
+        return $this->apiToken?->entidad_nombre ?? 'Entidad desconocida';
     }
 
     /**

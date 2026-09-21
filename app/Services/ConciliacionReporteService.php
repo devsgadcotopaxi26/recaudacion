@@ -35,13 +35,14 @@ class ConciliacionReporteService
      * Filtros soportados (todos opcionales — el llamador decide cuáles
      * exigir mediante su propio Validator):
      *   fecha_desde, fecha_hasta (Y-m-d, requieren ambas para filtrar por rango),
-     *   entidad (coincidencia parcial contra transacciones_pago.entidad_recaudadora),
+     *   entidad (coincidencia parcial contra api_tokens.entidad_nombre, vía
+     *     transacciones_pago.api_token_id),
      *   estado (pagado|pendiente|fallido|expirado|reversado),
      *   placa, anio_fiscal, codigo_consulta.
      */
     public function construirQuery(array $filtros): Builder
     {
-        $query = PagoDetalle::query()->with('transaccionPago');
+        $query = PagoDetalle::query()->with('transaccionPago.apiToken');
 
         if (!empty($filtros['fecha_desde']) && !empty($filtros['fecha_hasta'])) {
             $query->whereBetween('pago_detalles.created_at', [
@@ -53,7 +54,9 @@ class ConciliacionReporteService
         if (!empty($filtros['entidad']) || !empty($filtros['codigo_consulta'])) {
             $query->whereHas('transaccionPago', function ($q) use ($filtros) {
                 if (!empty($filtros['entidad'])) {
-                    $q->where('entidad_recaudadora', 'like', '%' . $filtros['entidad'] . '%');
+                    $q->whereHas('apiToken', function ($q2) use ($filtros) {
+                        $q2->where('entidad_nombre', 'like', '%' . $filtros['entidad'] . '%');
+                    });
                 }
                 if (!empty($filtros['codigo_consulta'])) {
                     $q->where('codigo_consulta', $filtros['codigo_consulta']);
@@ -111,7 +114,7 @@ class ConciliacionReporteService
     public function resumenPorEntidad(Collection $pagos): Collection
     {
         return $pagos->groupBy(function ($pago) {
-            return $pago->transaccionPago->entidad_recaudadora ?? 'Sin entidad';
+            return $pago->transaccionPago->nombreEntidad();
         })->map(function ($pagosPorEntidad, $nombreEntidad) {
             $pagadosEntidad = $pagosPorEntidad->where('estado', 'pagado');
             return [
@@ -179,7 +182,7 @@ class ConciliacionReporteService
             'referencia_pago' => $transaccion->referencia_externa,
             'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
             'fecha_registro' => $pago->created_at->format('Y-m-d H:i:s'),
-            'entidad_recaudadora' => $transaccion->entidad_recaudadora,
+            'entidad_recaudadora' => $transaccion->nombreEntidad(),
             'codigo_consulta' => $transaccion->codigo_consulta,
             'metodo_pago' => $datosAdicionales['metodo_pago'] ?? null,
         ];

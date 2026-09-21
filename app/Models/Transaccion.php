@@ -29,15 +29,6 @@ class Transaccion extends Model
     ];
 
     /**
-     * Relación histórica — filas de log creadas antes de la reestructuración
-     * cabecera/detalle, ligadas a Pago (hoy `pagos_legacy`).
-     */
-    public function pago(): BelongsTo
-    {
-        return $this->belongsTo(Pago::class);
-    }
-
-    /**
      * Relación vigente — filas de log nuevas, ligadas a TransaccionPago.
      */
     public function transaccionPago(): BelongsTo
