@@ -18,8 +18,21 @@ class RedisRateLimiter
 
         // Verificar rate limiting
         if ($this->isRateLimited($ip)) {
+            $mensaje = 'Demasiadas solicitudes. Por favor, espera un momento antes de intentar nuevamente.';
+
+            // Rutas web servidas por Inertia (ej. /consultar, /pago/procesar):
+            // JSON crudo rompe el cliente de Inertia — no sabe renderizarlo
+            // y el ciudadano ve una pantalla en blanco/error técnico. Este
+            // middleware corre ANTES que el resto de la app y nunca lanza
+            // ThrottleRequestsException (responde JSON directo aquí mismo),
+            // así que el manejador en bootstrap/app.php no lo intercepta —
+            // hay que resolverlo en el mismo punto.
+            if ($request->header('X-Inertia')) {
+                return back()->with('error', $mensaje);
+            }
+
             return response()->json([
-                'error' => 'Demasiadas solicitudes. Por favor, espera un momento antes de intentar nuevamente.',
+                'error' => $mensaje,
                 'retry_after' => $this->getRetryAfter($ip)
             ], 429);
         }
