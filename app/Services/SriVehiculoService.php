@@ -887,7 +887,13 @@ class SriVehiculoService
                     // 2) Sin pagos locales: ultimoAnioPagado que reporta el SRI (+1) — no
                     //    se usa para decidir "pagado" (eso sigue siendo solo `pagos`), sólo
                     //    para no generar candidatos de años que el propio SRI ya declaró
-                    //    cubiertos en algún momento.
+                    //    cubiertos en algún momento. VÁLIDO SOLO PARA AÑOS YA CERRADOS: no
+                    //    existe convenio con el SRI que garantice que "matrícula pagada"
+                    //    implica "rodaje provincial pagado al GADPC", así que el año EN
+                    //    CURSO nunca puede darse por cubierto solo con este dato — se topa
+                    //    la señal del SRI en (año actual - 1) como máximo, para que el año
+                    //    en curso siempre quede como candidato salvo que exista PagoDetalle
+                    //    local para ese año específico (regla de negocio confirmada).
                     // 3) Limitación conocida: si tampoco hay esa señal (SRI no la reportó,
                     //    valor 0), no queda ningún dato real para acotar el rango — se
                     //    calcula únicamente el año actual como candidato mínimo.
@@ -898,7 +904,7 @@ class SriVehiculoService
                     if ($maxAnioPagadoLocal) {
                         $anioInicioCandidatos = (int) $maxAnioPagadoLocal + 1;
                     } elseif ($ultimoAnioPagadoSri > 0) {
-                        $anioInicioCandidatos = $ultimoAnioPagadoSri + 1;
+                        $anioInicioCandidatos = min($ultimoAnioPagadoSri, $anioActualCalc - 1) + 1;
                     } else {
                         $anioInicioCandidatos = $anioActualCalc;
                     }
