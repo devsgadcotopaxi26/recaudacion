@@ -125,6 +125,15 @@ class TransaccionPago extends Model
         $this->detalles()->update(['estado' => 'pagado']);
 
         $this->registrarEstadisticasRecaudacion();
+
+        // Invalida el caché de "deuda pendiente" (SriVehiculoService::
+        // consultarVehiculoCompleto(), clave sri_full_v3_{placa}) — ese
+        // caché incorpora una consulta a PagoDetalle local, así que sin
+        // esto la consulta pública seguiría mostrando deuda ya pagada
+        // hasta que expire el TTL corto. NO se invalida sri:detalle:{placa}
+        // (dato crudo del SRI, no cambia porque este sistema registró un
+        // pago) — evita una llamada real al SRI innecesaria.
+        \Illuminate\Support\Facades\Cache::forget("sri_full_v3_{$this->placa}");
     }
 
     public function marcarComoFallido(): void

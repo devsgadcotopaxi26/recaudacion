@@ -16,7 +16,15 @@ class SriVehiculoService
     private string $baseUrl;
     private int $timeout;
     private bool $cacheEnabled;
+    // Datos CRUDOS del SRI (marca/modelo/rubros tal como los reporta),
+    // sin cruce con pagos locales — seguro cachear por horas.
     private int $cacheTtl;
+    // Respuesta YA COMBINADA con PagoDetalle local (ver
+    // consultarVehiculoCompleto(), rama 'historial') — un pago reciente
+    // puede quedar detrás de este caché, así que el TTL es corto a
+    // propósito y además se invalida activamente al registrar un pago
+    // (TransaccionPago::marcarComoPagado(), BancaController::registrarPago()).
+    private int $cacheTtlDeuda;
     private int $retryTimes;   // Intentos extra en errores 5xx/network
     private int $retryDelayMs; // Pausa entre reintentos (milisegundos)
 
@@ -26,6 +34,7 @@ class SriVehiculoService
         $this->timeout = config('sri.timeout', 10);
         $this->cacheEnabled = config('sri.cache.enabled', true);
         $this->cacheTtl = config('sri.cache.ttl', 3600);
+        $this->cacheTtlDeuda = config('sri.cache.ttl_deuda', 300);
         $this->retryTimes = config('sri.retry.times', 2);    // 2 reintentos
         $this->retryDelayMs = config('sri.retry.delay_ms', 1500); // 1.5 s entre intentos
     }
@@ -255,6 +264,10 @@ class SriVehiculoService
                         ];
                     }
 
+                    // TTL largo intencional ($cacheTtl, 24h por defecto):
+                    // esto es dato CRUDO del SRI (marca/modelo/rubros tal
+                    // como los reporta), sin cruce con pagos locales — no
+                    // se vuelve "viejo" cuando alguien paga en este sistema.
                     if ($this->cacheEnabled) {
                         Cache::put($cacheKey, $data, $this->cacheTtl);
                     }
@@ -885,8 +898,8 @@ class SriVehiculoService
                     //    pagado localmente hasta hoy — la fuente más específica, sabemos
                     //    exactamente qué años ya cubrimos por este sistema.
                     // 2) Sin pagos locales: ultimoAnioPagado que reporta el SRI (+1) — no
-                    //    se usa para decidir "pagado" (eso sigue siendo solo `pagos`), sólo
-                    //    para no generar candidatos de años que el propio SRI ya declaró
+                    //    se usa para decidir "pagado" (eso sigue siendo solo PagoDetalle
+                    //    local), sólo para no generar candidatos de años que el propio SRI ya declaró
                     //    cubiertos en algún momento. VÁLIDO SOLO PARA AÑOS YA CERRADOS: no
                     //    existe convenio con el SRI que garantice que "matrícula pagada"
                     //    implica "rodaje provincial pagado al GADPC", así que el año EN
@@ -978,9 +991,15 @@ class SriVehiculoService
                     'rubros' => $rubros,
                 ];
 
-                // Guardar en caché si está habilitado
+                // Guardar en caché si está habilitado. TTL corto
+                // ($cacheTtlDeuda, no $cacheTtl): este resultado incorpora
+                // la consulta a PagoDetalle local (rama 'historial' arriba),
+                // así que un pago reciente podría quedar oculto detrás del
+                // caché — el TTL corto es la red de seguridad además de la
+                // invalidación activa en TransaccionPago::marcarComoPagado()
+                // y BancaController::registrarPago().
                 if ($this->cacheEnabled) {
-                    Cache::put($cacheKey, $resultado, $this->cacheTtl);
+                    Cache::put($cacheKey, $resultado, $this->cacheTtlDeuda);
                 }
 
                 return $resultado;
