@@ -88,30 +88,6 @@ class VehiculoController extends Controller
     }
 
     /**
-     * Mapear clase del SRI a tipo de vehículo local
-     */
-    private function mapearTipoVehiculo(?string $nombreClase): string
-    {
-        if (!$nombreClase) {
-            return 'automovil';
-        }
-
-        $nombreClase = strtolower($nombreClase);
-
-        if (str_contains($nombreClase, 'moto') || str_contains($nombreClase, 'motocicleta')) {
-            return 'motocicleta';
-        } elseif (str_contains($nombreClase, 'camion')) {
-            return 'camion';
-        } elseif (str_contains($nombreClase, 'bus')) {
-            return 'bus';
-        } elseif (str_contains($nombreClase, 'camioneta')) {
-            return 'camioneta';
-        }
-
-        return 'automovil';
-    }
-
-    /**
      * Incrementar estadísticas de consultas
      */
     private function incrementarEstadisticas(string $placa): void

@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\TransaccionPago;
 use App\Models\Transaccion;
-use App\Models\Vehiculo;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Exception;

@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\TransaccionPago;
 use App\Models\PagoDetalle;
-use App\Models\Vehiculo;
 use App\Services\PaymentGatewayService;
 use App\Services\SriVehiculoService;
 use Illuminate\Http\Request;
@@ -261,7 +260,13 @@ class PagoController extends Controller
 
         $pago->loadMissing('detalles');
 
-        // Cachear datos del comprobante (30 días)
+        // Cachear datos del comprobante (30 días) — a propósito, y NO
+        // comparable con el caché de "deuda pendiente" de
+        // SriVehiculoService::consultarVehiculoCompleto() (TTL corto,
+        // 5 min): esto es un pago YA CONFIRMADO ($pago->estaPagado()
+        // arriba), clave por id de transacción (no por placa), dato
+        // inmutable una vez pagado — un TTL largo aquí no puede esconder
+        // ningún cambio de estado futuro.
         $cacheKey = "comprobante:pago:{$pago->id}";
 
         $datos = Cache::remember($cacheKey, 2592000, function () use ($pago) {
@@ -311,6 +316,9 @@ class PagoController extends Controller
 
         $pago->loadMissing(['detalles', 'apiToken']);
 
+        // Mismo criterio que comprobante() arriba: pago ya confirmado,
+        // clave por id de transacción, TTL largo correcto (no es el caché
+        // de "deuda pendiente" — ver SriVehiculoService::consultarVehiculoCompleto()).
         $cacheKey = "certificado:pago:{$pago->id}";
 
         $datos = Cache::remember($cacheKey, 2592000, function () use ($pago) {

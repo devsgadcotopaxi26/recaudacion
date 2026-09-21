@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Vehiculo;
 use App\Models\TransaccionPago;
 use App\Models\PagoDetalle;
 use Illuminate\Http\Request;
@@ -381,9 +380,13 @@ class BancaController extends Controller
                 return [$transaccion, $pagosCreados];
             });
 
-            // Borrar cache del SRI para que la próxima consulta muestre el estado real
+            // Borrar el caché de "deuda pendiente" (incorpora PagoDetalle
+            // local, ver SriVehiculoService::consultarVehiculoCompleto())
+            // para que la próxima consulta muestre el pago de inmediato.
+            // NO se borra sri:detalle:{placa} (dato crudo del SRI, no
+            // cambia por este pago) — evita una llamada real al SRI
+            // innecesaria en la siguiente consulta.
             \Illuminate\Support\Facades\Cache::forget("sri_full_v3_{$placa}");
-            \Illuminate\Support\Facades\Cache::forget("sri:detalle:{$placa}");
 
             Log::info('API: Pago registrado exitosamente', [
                 'placa' => $placa,

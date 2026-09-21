@@ -9,7 +9,15 @@ return new class extends Migration {
     {
         Schema::create('pagos', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('vehiculo_id')->constrained('vehiculos')->onDelete('cascade');
+            // Sin ->constrained('vehiculos'): la tabla `vehiculos` fue
+            // eliminada (huérfana desde el primer commit, nunca usada por
+            // ningún flujo real — ver 2026_09_21_115334_drop_vehiculos_table).
+            // `pagos` en sí es histórica: se renombra a `pagos_legacy` y se
+            // elimina por completo más adelante en esta misma cadena de
+            // migraciones (2026_09_18_090000 y 2026_09_18_130000) — se deja
+            // la columna sin FK únicamente para no romper el orden de
+            // replay de `migrate:fresh`, no porque siga en uso.
+            $table->foreignId('vehiculo_id');
             $table->decimal('monto_impuesto', 10, 2);
             $table->decimal('monto_total', 10, 2);
             $table->enum('estado', ['pendiente', 'pagado', 'fallido', 'expirado'])->default('pendiente');
