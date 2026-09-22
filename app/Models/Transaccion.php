@@ -13,7 +13,6 @@ class Transaccion extends Model
     protected $table = 'transacciones';
 
     protected $fillable = [
-        'pago_id',
         'transaccion_pago_id',
         'tipo',
         'datos_request',
