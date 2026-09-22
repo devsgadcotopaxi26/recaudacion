@@ -41,8 +41,14 @@ Route::middleware(['throttle:60,1', 'redis.ratelimit'])->group(function () {
 
 // Rutas de callback y confirmación (sin rate limit estricto)
 Route::get('/pago/callback', [PagoController::class, 'callback'])->name('pago.callback');
-Route::get('/pago/confirmacion/{pago}', [PagoController::class, 'confirmacion'])->name('pago.confirmacion');
-Route::get('/comprobante/{pago}', [PagoController::class, 'comprobante'])->name('pago.comprobante');
+// {pago:certificado_token}: route model binding por el token aleatorio,
+// NO por el id crudo — el id es secuencial (coincide con "comprobante",
+// PAG-XXXXXX) y estas rutas devuelven datos_facturacion (PII) sin
+// autenticación; usar el id permitía enumerar pagos de otros ciudadanos
+// (ver auditoría de seguridad). certificado_token ya existe y es
+// aleatorio — se reutiliza en vez de crear un tercer identificador.
+Route::get('/pago/confirmacion/{pago:certificado_token}', [PagoController::class, 'confirmacion'])->name('pago.confirmacion');
+Route::get('/comprobante/{pago:certificado_token}', [PagoController::class, 'comprobante'])->name('pago.comprobante');
 
 // Certificado de Pago (documento estandarizado, valido para cualquier
 // entidad recaudadora). Clave de acceso: certificado_token, no referencia_pago

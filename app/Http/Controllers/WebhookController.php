@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\ProcessPaymentWebhook;
+use App\Models\TransaccionPago;
 use App\Services\PaymentGatewayService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -38,8 +39,13 @@ class WebhookController extends Controller
                 $pagoId = $resultado['pago_id'] ?? null;
 
                 if ($pagoId) {
-                    // Redirigir a la página de confirmación
-                    return redirect()->route('pago.confirmacion', ['pago' => $pagoId]);
+                    // La ruta usa certificado_token (no el id crudo) como
+                    // clave de acceso — ver routes/web.php.
+                    $certificadoToken = TransaccionPago::find($pagoId)?->certificado_token;
+
+                    if ($certificadoToken) {
+                        return redirect()->route('pago.confirmacion', ['pago' => $certificadoToken]);
+                    }
                 }
             } else {
                 Log::error('Error procesando webhook', $resultado);

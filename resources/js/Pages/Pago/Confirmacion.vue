@@ -345,7 +345,7 @@ const formatDate = (dateString) => {
 
           <a
             v-if="pago.estado === 'pagado'"
-            :href="`/comprobante/${pago.id}`"
+            :href="`/comprobante/${pago.certificado_token}`"
             target="_blank"
             class="flex-1 btn btn-primary py-3 text-center text-lg"
           >

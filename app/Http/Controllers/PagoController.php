@@ -63,10 +63,11 @@ class PagoController extends Controller
         $detallePrevio = PagoDetalle::where('placa', $placa)
             ->where('anio_fiscal', date('Y'))
             ->where('estado', 'pagado')
+            ->with('transaccionPago')
             ->first();
 
         if ($detallePrevio) {
-            return redirect()->route('pago.comprobante', $detallePrevio->transaccion_pago_id)
+            return redirect()->route('pago.comprobante', $detallePrevio->transaccionPago->certificado_token)
                 ->with('info', 'Este vehículo ya pagó el impuesto este año.');
         }
 
