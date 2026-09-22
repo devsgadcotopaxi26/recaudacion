@@ -35,6 +35,7 @@ class PagoController extends Controller
             'placa' => $transaccion->placa,
             'referencia_pago' => $transaccion->referencia_externa,
             'certificado_token' => $transaccion->certificado_token,
+            'token_verificacion' => $transaccion->token_verificacion,
             'link_pago' => $transaccion->link_pago,
             'estado' => $transaccion->estado,
             'fecha_pago' => $transaccion->fecha_pago,
