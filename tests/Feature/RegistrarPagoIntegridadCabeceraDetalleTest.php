@@ -80,15 +80,14 @@ class RegistrarPagoIntegridadCabeceraDetalleTest extends TestCase
 
         // 3) Registrar el pago con el monto correcto (pasa la validación
         // de tolerancia de ±$1.00 normalmente) — el descuadre solo debe
-        // manifestarse en la guarda cabecera/detalle nueva.
-        $fechaPago = now()->subMinutes(2)->format('Y-m-d H:i:s');
+        // manifestarse en la guarda cabecera/detalle nueva. Sin fecha_pago
+        // en el body: ya no es un campo aceptado (ver auditoría).
         $registro = $this->withHeaders(['Authorization' => 'Bearer token_estatico_prueba'])
             ->postJson('/api/v1/registrar-pago', [
                 'placa' => 'ZZT9999',
                 'codigo_consulta' => $codigoConsulta,
                 'monto' => 10,
                 'referencia_externa' => 'TXN-TEST-DESCUADRE-001',
-                'fecha_pago' => $fechaPago,
             ]);
 
         $registro->assertStatus(500);
@@ -113,18 +112,25 @@ class RegistrarPagoIntegridadCabeceraDetalleTest extends TestCase
 
         $codigoConsulta = $consulta->json('data.codigo_consulta');
 
-        $fechaPago = now()->subMinutes(2)->format('Y-m-d H:i:s');
+        // Confirma de principio a fin que un request SIN fecha_pago en el
+        // body (ya no es un campo aceptado, ver auditoría) sigue
+        // registrando el pago correctamente.
         $registro = $this->withHeaders(['Authorization' => 'Bearer token_estatico_prueba'])
             ->postJson('/api/v1/registrar-pago', [
                 'placa' => 'ZZT9999',
                 'codigo_consulta' => $codigoConsulta,
                 'monto' => 10,
                 'referencia_externa' => 'TXN-TEST-OK-001',
-                'fecha_pago' => $fechaPago,
             ]);
 
         $registro->assertStatus(201);
         $this->assertSame(1, TransaccionPago::count());
         $this->assertSame(1, PagoDetalle::count());
+
+        $transaccion = TransaccionPago::first();
+        $this->assertNotNull(
+            $transaccion->fecha_pago,
+            'fecha_pago debe seguir llenándose server-side (now()) aunque el banco ya no la reporte.'
+        );
     }
 }
