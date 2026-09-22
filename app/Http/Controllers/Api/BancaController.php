@@ -358,8 +358,9 @@ class BancaController extends Controller
                 ]);
 
                 $pagosCreados = [];
+                $sumaDetalle = 0;
                 foreach ($aniosAPagar as $anioPago) {
-                    $transaccion->detalles()->create([
+                    $detalleCreado = $transaccion->detalles()->create([
                         'placa' => $placa,
                         'estado' => 'pagado',
                         'anio_fiscal' => $anioPago['anio'],
@@ -368,10 +369,43 @@ class BancaController extends Controller
                         'monto_total' => $anioPago['valor'],
                     ]);
 
+                    // Suma del valor REALMENTE persistido (no del array
+                    // fuente antes de guardar) — si algo mutara el monto
+                    // durante el create() (evento de modelo, etc.), la
+                    // guarda de abajo debe reflejar lo que de verdad quedó
+                    // en la fila, no lo que se intentó escribir.
+                    $sumaDetalle += (float) $detalleCreado->monto_total;
+
                     $pagosCreados[] = [
                         'anio_fiscal' => $anioPago['anio'],
                         'monto' => round($anioPago['valor'], 2),
                     ];
+                }
+
+                // Integridad cabecera/detalle: no existe trigger de BD ni
+                // otra validación que garantice esto (confirmado en
+                // auditoría) — si algún día un cálculo de $aniosAPagar
+                // queda desincronizado con $monto_total, esta es la última
+                // línea de defensa antes de comprometer la transacción.
+                // Lanzar aquí revierte TODO (cabecera + detalles ya
+                // creados) porque estamos dentro del DB::transaction().
+                //
+                // Tolerancia de $1.00, NO igualdad estricta: monto_total
+                // de la cabecera guarda lo que reportó el banco ($monto,
+                // ya validado arriba contra $montoEsperado con esa misma
+                // tolerancia), mientras que $sumaDetalle sale del cálculo
+                // del SRI — pueden diferir por diseño hasta $1.00 en
+                // operación normal. Esta guarda es para atrapar un
+                // descuadre GRUESO (ej. un detalle creado con monto
+                // equivocado por un bug futuro), no la tolerancia ya
+                // aceptada intencionalmente más arriba.
+                if (abs((float) $transaccion->monto_total - $sumaDetalle) > 1.00) {
+                    throw new \RuntimeException(sprintf(
+                        'Descuadre cabecera/detalle: monto_total=%s, suma_detalle=%s (transaccion sin persistir, placa=%s)',
+                        round((float) $transaccion->monto_total, 2),
+                        round($sumaDetalle, 2),
+                        $placa
+                    ));
                 }
 
                 // Marcar la consulta como pagada
