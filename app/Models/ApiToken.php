@@ -25,10 +25,6 @@ class ApiToken extends Model
         'usuario',
         'password_hash',
         'token',
-        'access_token',
-        'token_expira_en',
-        'refresh_token',
-        'refresh_token_expira_en',
         'activo',
         'requests_permitidos',
         'ultimo_uso',
@@ -39,15 +35,11 @@ class ApiToken extends Model
     protected $hidden = [
         'password_hash',
         'token',
-        'access_token',
-        'refresh_token',
     ];
 
     protected $casts = [
         'activo' => 'boolean',
         'requests_permitidos' => 'integer',
-        'token_expira_en' => 'datetime',
-        'refresh_token_expira_en' => 'datetime',
         'ultimo_uso' => 'datetime',
     ];
 
