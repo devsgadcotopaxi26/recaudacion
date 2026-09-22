@@ -365,8 +365,13 @@ class PagoController extends Controller
     public function verificar(string $referencia)
     {
         try {
-            // Buscar pago por referencia
-            $pago = TransaccionPago::where('referencia_externa', $referencia)->first();
+            // Única clave válida: token_verificacion (aleatorio, no
+            // adivinable — ver auditoría de seguridad). referencia_externa
+            // la define el banco/pasarela externa y puede ser predecible
+            // (ej. un timestamp), no apta como credencial de búsqueda
+            // pública. Sin fallback: no hay datos reales en producción
+            // todavía, no hace falta mantener compatibilidad con nada viejo.
+            $pago = TransaccionPago::where('token_verificacion', $referencia)->first();
 
             if (!$pago) {
                 return Inertia::render('Pago/Verificacion', [
