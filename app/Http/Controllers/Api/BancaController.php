@@ -63,7 +63,6 @@ class BancaController extends Controller
                     $consultaRegistrada = \App\Models\ConsultaBancaria::create([
                         'codigo_consulta' => $codigoConsulta,
                         'api_token_id'   => $request->api_token_id,
-                        'entidad_nombre' => $request->entidad_nombre,
                         'placa'          => $placa,
                         'anio_fiscal'    => $anioFiscal,
                         'metodo_sri'     => $metodoSri,
