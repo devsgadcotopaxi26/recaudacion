@@ -70,7 +70,6 @@ class BancaController extends Controller
                         'total_rodaje'   => $resultado['totales_sri']['total_rodaje'] ?? 0,
                         'total_mora'     => $resultado['totales_sri']['total_mora'] ?? 0,
                         'total_a_pagar'  => $totalAPagar,
-                        'monto_a_pagar'  => $totalAPagar,
                         'estado'         => 'pendiente',
                         'expira_en'      => now()->addHours(24),
                         'ip_address'     => request()->ip(),
