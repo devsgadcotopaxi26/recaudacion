@@ -320,7 +320,7 @@ class PaymentGatewayService
     public function generarLinkPrueba(TransaccionPago $pago): array
     {
         // Para desarrollo: generar link simulado
-        $linkPrueba = route('pago.confirmacion', ['pago' => $pago->id]) . '?test=1';
+        $linkPrueba = route('pago.confirmacion', ['pago' => $pago->certificado_token]) . '?test=1';
 
         $pago->update([
             'link_pago' => $linkPrueba,

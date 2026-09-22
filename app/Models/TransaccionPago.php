@@ -32,6 +32,15 @@ class TransaccionPago extends Model
             if (empty($transaccion->certificado_token)) {
                 $transaccion->certificado_token = Str::random(32);
             }
+
+            // Identificador de verificación de bajo privilegio (ver
+            // migración 2026_09_22_090000): separado de certificado_token
+            // a propósito — este es para el caso "verificar autenticidad
+            // de un comprobante impreso/QR" (respuesta mínima, sin PII),
+            // certificado_token es para el certificado completo.
+            if (empty($transaccion->token_verificacion)) {
+                $transaccion->token_verificacion = Str::random(32);
+            }
         });
     }
 
@@ -46,6 +55,7 @@ class TransaccionPago extends Model
         'estado',
         'fecha_pago',
         'certificado_token',
+        'token_verificacion',
         'link_pago',
         'datos_facturacion',
         'datos_adicionales',

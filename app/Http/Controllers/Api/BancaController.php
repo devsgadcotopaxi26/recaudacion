@@ -441,6 +441,12 @@ class BancaController extends Controller
                     // año — coincide con lo que el ciudadano recibe en la vida
                     // real en ventanilla (un pago de varios años = un recibo).
                     'comprobante' => $transaccion->comprobante(),
+                    // Aditivo (no reemplaza a 'comprobante', que sigue igual):
+                    // clave para construir la URL de verificación pública
+                    // (GET /verificar/{token_verificacion}) sin exponer un
+                    // identificador secuencial ni depender de
+                    // referencia_externa — ver auditoría de seguridad.
+                    'token_verificacion' => $transaccion->token_verificacion,
                     'monto_total_pagado' => round($monto, 2),
                     'anios_pagados' => count($pagosCreados),
                     'fecha_registro' => now()->format('Y-m-d H:i:s'),
@@ -522,10 +528,22 @@ class BancaController extends Controller
 
             // Buscar por codigo_consulta (prioridad 1) o referencia externa
             // (prioridad 2): identifican la TRANSACCIÓN completa.
+            //
+            // Las 3 ramas se acotan a api_token_id === $request->api_token_id
+            // (inyectado por ValidateApiToken desde el token autenticado):
+            // sin esto, un banco autenticado con SU PROPIO token podía
+            // encontrar transacciones de CUALQUIER otra entidad si conocía
+            // o adivinaba su codigo_consulta/referencia_externa/placa+año
+            // (ver auditoría de seguridad) — fuga entre bancos/cooperativas
+            // competidores, no acceso público.
             if ($request->filled('codigo_consulta')) {
-                $transaccion = TransaccionPago::where('codigo_consulta', $request->codigo_consulta)->first();
+                $transaccion = TransaccionPago::where('codigo_consulta', $request->codigo_consulta)
+                    ->where('api_token_id', $request->api_token_id)
+                    ->first();
             } elseif ($request->filled('referencia_externa')) {
-                $transaccion = TransaccionPago::where('referencia_externa', $request->referencia_externa)->first();
+                $transaccion = TransaccionPago::where('referencia_externa', $request->referencia_externa)
+                    ->where('api_token_id', $request->api_token_id)
+                    ->first();
             }
             // Buscar por placa + año fiscal (prioridad 3): identifica un AÑO
             // específico, que puede venir dentro de una transacción con más años.
@@ -533,6 +551,9 @@ class BancaController extends Controller
                 $anioFiscalConsultado = $request->anio_fiscal ?? date('Y');
                 $detalle = PagoDetalle::where('placa', strtoupper($request->placa))
                     ->where('anio_fiscal', $anioFiscalConsultado)
+                    ->whereHas('transaccionPago', function ($q) use ($request) {
+                        $q->where('api_token_id', $request->api_token_id);
+                    })
                     ->with('transaccionPago')
                     ->first();
                 $transaccion = $detalle?->transaccionPago;
