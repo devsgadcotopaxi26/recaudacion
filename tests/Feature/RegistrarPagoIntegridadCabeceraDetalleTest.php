@@ -132,5 +132,10 @@ class RegistrarPagoIntegridadCabeceraDetalleTest extends TestCase
             $transaccion->fecha_pago,
             'fecha_pago debe seguir llenándose server-side (now()) aunque el banco ya no la reporte.'
         );
+
+        // 'comprobante' es información interna/contable — ya no se expone
+        // al banco (ver auditoría), aunque comprobante() del modelo y las
+        // vistas internas lo sigan usando normalmente.
+        $registro->assertJsonMissingPath('data.comprobante');
     }
 }

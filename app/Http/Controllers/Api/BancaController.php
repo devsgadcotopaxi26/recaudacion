@@ -194,7 +194,6 @@ class BancaController extends Controller
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
                         'pago_existente' => [
                             'id' => $transaccionExistente->id,
-                            'comprobante' => $transaccionExistente->comprobante(),
                             'codigo_consulta' => $transaccionExistente->codigo_consulta,
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
                             // no es un dato corrupto ni faltante).
@@ -423,17 +422,17 @@ class BancaController extends Controller
                 'data' => [
                     'codigo_consulta' => $consulta->codigo_consulta,
                     'placa' => $placa,
-                    // Un solo comprobante para toda la transacción, no uno por
-                    // año — coincide con lo que el ciudadano recibe en la vida
-                    // real en ventanilla (un pago de varios años = un recibo).
-                    'comprobante' => $transaccion->comprobante(),
-                    // Aditivo (no reemplaza a 'comprobante', que sigue igual):
-                    // clave para construir la URL de verificación pública
-                    // (GET /verificar/{codigo_transaccion}) sin exponer un
-                    // identificador secuencial ni depender de
+                    // 'comprobante' (PAG-XXXXXX) ya NO se expone al banco —
+                    // es información interna/contable; el banco ya tiene
+                    // codigo_transaccion para verificación pública y
+                    // referencia_externa para su propia reconciliación.
+                    // El campo y comprobante() del modelo siguen existiendo
+                    // igual para uso interno (certificados, admin).
+                    //
+                    // codigo_transaccion: clave para construir la URL de
+                    // verificación pública (GET /verificar/{codigo_transaccion})
+                    // sin exponer un identificador secuencial ni depender de
                     // referencia_externa — ver auditoría de seguridad.
-                    // Renombrado desde token_verificacion (2026_09_23_130000):
-                    // mismo campo, ningún consumidor real todavía.
                     'codigo_transaccion' => $transaccion->codigo_transaccion,
                     'monto_total_pagado' => round($monto, 2),
                     'anios_pagados' => count($pagosCreados),
@@ -577,7 +576,6 @@ class BancaController extends Controller
                 'message' => 'Pago encontrado',
                 'data' => [
                     'transaccion_id' => $transaccion->id,
-                    'comprobante' => $transaccion->comprobante(),
                     'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
@@ -661,12 +659,13 @@ class BancaController extends Controller
             $pendientes = $pagos->where('estado', 'pendiente');
             $fallidos = $pagos->where('estado', 'fallido');
 
-            // Detalle de cada pago (comprobante y referencia salen de la
-            // transacción — compartidos entre todos los años de un mismo pago).
+            // Detalle de cada pago (referencia sale de la transacción —
+            // compartida entre todos los años de un mismo pago). 'comprobante'
+            // ya no se expone al banco (info interna/contable); pago_id sigue
+            // siendo suficiente para identificar la transacción.
             $detalle = $pagos->map(function ($d) {
                 return [
                     'pago_id' => $d->transaccionPago->id,
-                    'comprobante' => $d->transaccionPago->comprobante(),
                     'placa' => $d->placa,
                     'anio_fiscal' => $d->anio_fiscal,
                     'monto_total' => round((float) $d->monto_total, 2),
