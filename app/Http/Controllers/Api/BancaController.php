@@ -552,10 +552,13 @@ class BancaController extends Controller
                 'api_token_id' => $request->api_token_id,
             ]);
 
+            // 'rodaje' (no 'monto_impuesto'): coherencia con
+            // consulta-deuda-rodaje-bancos, que ya usa ese nombre para el
+            // mismo concepto.
             $detalles = $transaccion->detalles->map(function ($d) {
                 return [
                     'anio_fiscal' => $d->anio_fiscal,
-                    'monto_impuesto' => round((float) $d->monto_impuesto, 2),
+                    'rodaje' => round((float) $d->monto_impuesto, 2),
                     'monto_mora' => round((float) $d->monto_mora, 2),
                     'monto_total' => round((float) $d->monto_total, 2),
                     'estado' => $d->estado,
@@ -574,12 +577,21 @@ class BancaController extends Controller
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
                     'placa' => $transaccion->placa,
-                    'monto_total' => round((float) $transaccion->monto_total, 2),
-                    'anios_cubiertos' => $detalles->count(),
+                    // Nombre coherente con registrar-pago, que ya usa
+                    // 'monto_total_pagado' a nivel general (distinto de
+                    // 'monto_total' dentro de cada fila de 'detalles', que
+                    // es el total de ESE año puntual, no de toda la
+                    // transacción — se deja igual a propósito).
+                    'monto_total_pagado' => round((float) $transaccion->monto_total, 2),
+                    'anios_pagados' => $detalles->count(),
                     'detalles' => $detalles,
                     'estado' => $transaccion->estado,
                     'referencia_pago' => $transaccion->referencia_externa,
-                    'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
+                    // fecha_pago ya no se expone — para pagos nuevos es
+                    // idéntica a fecha_registro (ver auditoría: el banco
+                    // dejó de poder reportar una fecha_pago propia),
+                    // coherente con registrar-pago, que nunca tuvo este
+                    // campo.
                     'fecha_registro' => $transaccion->created_at->format('Y-m-d H:i:s'),
                     'entidad_recaudadora' => $transaccion->nombreEntidad(),
                 ]
