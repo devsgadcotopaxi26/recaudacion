@@ -851,11 +851,18 @@ class BancaController extends Controller
     }
 
     /**
-     * Reporte administrativo de conciliación para el GAD
+     * Reporte administrativo de conciliación
      *
-     * Permite ver TODOS los pagos registrados o filtrar por entidad.
-     * A diferencia de /reporte-conciliacion (que solo muestra los pagos
-     * de la entidad autenticada), este muestra todo para comparar.
+     * CORREGIDO (auditoría de seguridad): este endpoint vive bajo el mismo
+     * middleware api.token que el resto de la API bancaria — cualquier
+     * entidad autenticada con SU PROPIO token puede llamarlo, no solo el
+     * GAD. Antes de este fix devolvía los pagos de TODAS las entidades sin
+     * filtrar, permitiendo que un banco viera la conciliación de sus
+     * competidores. Ahora se acota SIEMPRE por api_token_id, igual que
+     * verificarPago() y reporteConciliacion() — en la práctica, un banco ve
+     * exactamente lo mismo aquí que en /reporte-conciliacion (misma
+     * entidad), solo que con el resumen_por_entidad/filtros adicionales
+     * que ya tenía este endpoint.
      *
      * POST /api/v1/admin/reporte-conciliacion
      */
@@ -899,6 +906,10 @@ class BancaController extends Controller
                 'placa' => $request->placa,
                 'anio_fiscal' => $request->anio_fiscal,
                 'codigo_consulta' => $request->codigo_consulta,
+                // Scope obligatorio — ver docblock del método. Sin esto,
+                // cualquier banco veía la conciliación de todas las
+                // entidades.
+                'api_token_id' => $request->api_token_id,
             ]);
 
             $pagos = $query->orderBy('created_at', 'asc')->get();
@@ -911,8 +922,9 @@ class BancaController extends Controller
             // Agrupar por entidad para comparar
             $porEntidad = $service->resumenPorEntidad($pagos);
 
-            // Detalle de cada pago
-            $detalle = $pagos->map(fn($pago) => $service->formatearDetalle($pago));
+            // Detalle de cada pago — variante BANCARIA (sin id crudo ni
+            // comprobante, ver ConciliacionReporteService).
+            $detalle = $pagos->map(fn($pago) => $service->formatearDetalleBancario($pago));
 
             Log::info('API: Reporte admin de conciliación generado', [
                 'solicitado_por' => $request->entidad_nombre,
