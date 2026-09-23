@@ -49,7 +49,7 @@ class BancaVerificarPagoScopeTest extends TestCase
     public function test_el_dueno_encuentra_su_propia_transaccion_por_referencia_externa(): void
     {
         $bancoA = $this->crearApiToken('banco_a');
-        $this->crearTransaccionDe($bancoA);
+        $transaccion = $this->crearTransaccionDe($bancoA);
 
         $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
             ->postJson('/api/v1/verificar-pago', ['referencia_externa' => 'TXN-DUENIO-0001']);
@@ -60,6 +60,10 @@ class BancaVerificarPagoScopeTest extends TestCase
         // modelo y las vistas internas los sigan usando normalmente.
         $response->assertJsonMissingPath('data.comprobante');
         $response->assertJsonMissingPath('data.transaccion_id');
+        // codigo_transaccion se confirma de vuelta aunque la búsqueda haya
+        // sido por referencia_externa (antes había asimetría entre los 2
+        // criterios válidos).
+        $response->assertJsonPath('data.codigo_transaccion', $transaccion->codigo_transaccion);
     }
 
     public function test_el_dueno_encuentra_su_propia_transaccion_por_codigo_transaccion(): void
@@ -71,6 +75,7 @@ class BancaVerificarPagoScopeTest extends TestCase
             ->postJson('/api/v1/verificar-pago', ['codigo_transaccion' => $transaccion->codigo_transaccion]);
 
         $response->assertOk()->assertJson(['success' => true]);
+        $response->assertJsonPath('data.codigo_transaccion', $transaccion->codigo_transaccion);
     }
 
     public function test_respuesta_usa_los_nombres_de_campo_nuevos(): void

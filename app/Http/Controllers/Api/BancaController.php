@@ -574,6 +574,12 @@ class BancaController extends Controller
                     // disfraz del prefijo "PAG-". codigo_transaccion sigue
                     // siendo la clave pública de verificación.
                     'codigo_consulta' => $transaccion->codigo_consulta,
+                    // Se confirma de vuelta aunque la búsqueda haya sido por
+                    // referencia_externa — sin esto, buscar por
+                    // referencia_externa devolvía el dato completo pero
+                    // buscar por codigo_transaccion nunca lo confirmaba de
+                    // vuelta (asimetría real entre los 2 criterios válidos).
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
                     'placa' => $transaccion->placa,
