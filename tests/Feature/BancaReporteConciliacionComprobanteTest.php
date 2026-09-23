@@ -51,8 +51,16 @@ class BancaReporteConciliacionComprobanteTest extends TestCase
 
         // 'comprobante' es información interna/contable — ya no se expone
         // al banco. 'pago_id' se mantiene sin renombrar (ver auditoría:
-        // ya forma parte del contrato público documentado).
+        // ya forma parte del contrato público documentado) — pero su VALOR
+        // ya no es el id crudo autoincremental (mismo riesgo de
+        // enumeración que comprobante/transaccion_id sin ningún disfraz):
+        // ahora es codigo_transaccion (formato TRX-XXXXXX).
         $this->assertArrayNotHasKey('comprobante', $response->json('data.detalle_pagos.0'));
         $this->assertArrayHasKey('pago_id', $response->json('data.detalle_pagos.0'));
+        $this->assertSame(
+            $transaccion->codigo_transaccion,
+            $response->json('data.detalle_pagos.0.pago_id')
+        );
+        $this->assertNotSame($transaccion->id, $response->json('data.detalle_pagos.0.pago_id'));
     }
 }

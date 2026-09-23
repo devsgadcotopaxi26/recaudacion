@@ -663,11 +663,16 @@ class BancaController extends Controller
 
             // Detalle de cada pago (referencia sale de la transacción —
             // compartida entre todos los años de un mismo pago). 'comprobante'
-            // ya no se expone al banco (info interna/contable); pago_id sigue
-            // siendo suficiente para identificar la transacción.
+            // ya no se expone al banco (info interna/contable). 'pago_id'
+            // mantiene su NOMBRE (contrato público documentado, no se
+            // renombra) pero ya no es el id crudo autoincremental — mismo
+            // riesgo de enumeración que comprobante/transaccion_id, sin
+            // ningún disfraz. Ahora lleva codigo_transaccion (formato
+            // TRX-XXXXXX, no adivinable), sigue identificando la
+            // transacción sin ambigüedad para quien consuma el reporte.
             $detalle = $pagos->map(function ($d) {
                 return [
-                    'pago_id' => $d->transaccionPago->id,
+                    'pago_id' => $d->transaccionPago->codigo_transaccion,
                     'placa' => $d->placa,
                     'anio_fiscal' => $d->anio_fiscal,
                     'monto_total' => round((float) $d->monto_total, 2),
