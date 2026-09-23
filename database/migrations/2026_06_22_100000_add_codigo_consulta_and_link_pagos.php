@@ -4,33 +4,18 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
+/**
+ * CONSOLIDADO (2026-09-23): la parte de esta migración que tocaba
+ * consulta_bancarias (codigo_consulta, estado, expira_en — vivas; y
+ * monto_a_pagar, eliminada en esta misma sesión por duplicar
+ * total_a_pagar) se integró directamente en create_consulta_bancarias_table
+ * y se quitó de aquí. La parte que vincula `pagos` (tabla legacy, ya
+ * eliminada más adelante en la cadena de migraciones, fuera del alcance de
+ * este consolidado) se deja exactamente igual.
+ */
 return new class extends Migration {
     public function up(): void
     {
-        // Agregar código único a consultas
-        Schema::table('consulta_bancarias', function (Blueprint $table) {
-            $table->string('codigo_consulta', 30)
-                ->unique()
-                ->nullable()
-                ->after('id')
-                ->comment('Código único para trazar consulta con pago: CON-YYYYMMDD-XXXXX');
-
-            $table->decimal('monto_a_pagar', 12, 2)
-                ->default(0)
-                ->after('total_a_pagar')
-                ->comment('Monto que se debe pagar (rodaje)');
-
-            $table->enum('estado', ['pendiente', 'pagado', 'expirado'])
-                ->default('pendiente')
-                ->after('monto_a_pagar')
-                ->comment('Estado de la consulta');
-
-            $table->timestamp('expira_en')
-                ->nullable()
-                ->after('estado')
-                ->comment('La consulta expira en 24 horas');
-        });
-
         // Vincular pago con consulta
         Schema::table('pagos', function (Blueprint $table) {
             $table->unsignedBigInteger('consulta_bancaria_id')
@@ -50,10 +35,6 @@ return new class extends Migration {
         Schema::table('pagos', function (Blueprint $table) {
             $table->dropForeign(['consulta_bancaria_id']);
             $table->dropColumn('consulta_bancaria_id');
-        });
-
-        Schema::table('consulta_bancarias', function (Blueprint $table) {
-            $table->dropColumn(['codigo_consulta', 'monto_a_pagar', 'estado', 'expira_en']);
         });
     }
 };

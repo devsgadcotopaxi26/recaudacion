@@ -34,7 +34,7 @@ class TransaccionPago extends Model
             }
 
             // Identificador de verificación de bajo privilegio (ver
-            // migración 2026_09_22_090000, renombrado en 2026_09_23_130000):
+            // create_transacciones_pago_table, columna codigo_transaccion):
             // separado de certificado_token a propósito — este es para el
             // caso "verificar autenticidad de un comprobante impreso/QR"
             // (respuesta mínima, sin PII), certificado_token es para el

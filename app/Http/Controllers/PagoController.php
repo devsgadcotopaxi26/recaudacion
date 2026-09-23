@@ -368,8 +368,7 @@ class PagoController extends Controller
     {
         try {
             // Única clave válida: codigo_transaccion (formato TRX-XXXXXX,
-            // no adivinable — ver auditoría de seguridad; renombrado desde
-            // token_verificacion en 2026_09_23_130000). referencia_externa
+            // no adivinable — ver auditoría de seguridad). referencia_externa
             // la define el banco/pasarela externa y puede ser predecible
             // (ej. un timestamp), no apta como credencial de búsqueda
             // pública. Sin fallback: no hay datos reales en producción

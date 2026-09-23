@@ -13,6 +13,12 @@ use Illuminate\Support\Facades\Schema;
  * `pago_id` (FK a pagos_legacy) se deja intacto para las filas de log ya
  * existentes, generadas antes de esta reestructuración. Las llamadas
  * nuevas de PaymentGatewayService usan `transaccion_pago_id`.
+ *
+ * CONSOLIDADO (2026-09-23): pago_id ya no existe (se quitó directamente de
+ * create_transacciones_table, ver esa migración) — el ->after() de abajo
+ * se ajustó de 'pago_id' a 'id' en consecuencia. Esta migración en sí NO
+ * se pudo fusionar en el create: depende de que transacciones_pago ya
+ * exista, y esa tabla se crea después en la cadena cronológica.
  */
 return new class extends Migration {
     public function up(): void
@@ -20,7 +26,7 @@ return new class extends Migration {
         Schema::table('transacciones', function (Blueprint $table) {
             $table->foreignId('transaccion_pago_id')
                 ->nullable()
-                ->after('pago_id')
+                ->after('id')
                 ->constrained('transacciones_pago')
                 ->nullOnDelete();
         });

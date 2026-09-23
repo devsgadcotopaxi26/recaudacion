@@ -15,19 +15,17 @@ use Illuminate\Support\Facades\Schema;
  *
  * `transacciones.pago_id` tenía una FK real hacia esta tabla
  * (`transacciones_pago_id_foreign`, heredada del CREATE TABLE original
- * apuntando a `pagos` antes del RENAME). Hay que liberarla primero o el
- * DROP TABLE falla. La columna `pago_id` en sí se deja intacta (fuera de
- * alcance de esta tarea): queda como bigint nullable sin FK, historial
- * muerto de filas de log previas a TransaccionPago, igual que ya se
- * documentó en la migración 2026_09_18_090300.
+ * apuntando a `pagos` antes del RENAME) — históricamente había que
+ * liberarla primero o el DROP TABLE fallaba.
+ *
+ * CONSOLIDADO (2026-09-23): pago_id (y su FK) ya no existen en absoluto —
+ * se quitaron directamente de create_transacciones_table (ver esa
+ * migración) en vez de crearse y luego borrarse. El dropForeign() de abajo
+ * ya no tiene nada que soltar, se quitó.
  */
 return new class extends Migration {
     public function up(): void
     {
-        Schema::table('transacciones', function (Blueprint $table) {
-            $table->dropForeign('transacciones_pago_id_foreign');
-        });
-
         Schema::dropIfExists('pagos_legacy');
     }
 
