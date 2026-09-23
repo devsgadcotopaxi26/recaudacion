@@ -92,6 +92,11 @@ class BancaVerificarPagoScopeTest extends TestCase
         $response->assertJsonMissingPath('data.fecha_pago');
         $response->assertJsonPath('data.fecha_registro', $transaccion->created_at->format('Y-m-d H:i:s'));
 
+        // referencia_externa (no referencia_pago) — mismo nombre que usó
+        // el banco al mandarlo en registrar-pago.
+        $response->assertJsonPath('data.referencia_externa', $transaccion->referencia_externa);
+        $response->assertJsonMissingPath('data.referencia_pago');
+
         // Nivel detalle: rodaje (no monto_impuesto); monto_total del
         // detalle se mantiene igual (total del año, no de la transacción).
         $response->assertJsonPath('data.detalles.0.rodaje', 10);

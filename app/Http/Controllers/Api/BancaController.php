@@ -586,7 +586,11 @@ class BancaController extends Controller
                     'anios_pagados' => $detalles->count(),
                     'detalles' => $detalles,
                     'estado' => $transaccion->estado,
-                    'referencia_pago' => $transaccion->referencia_externa,
+                    // Nombre coherente con registrar-pago, que el banco ya
+                    // mandó como 'referencia_externa' en el request — antes
+                    // se devolvía con otro nombre ('referencia_pago') para
+                    // el mismo valor.
+                    'referencia_externa' => $transaccion->referencia_externa,
                     // fecha_pago ya no se expone — para pagos nuevos es
                     // idéntica a fecha_registro (ver auditoría: el banco
                     // dejó de poder reportar una fecha_pago propia),
