@@ -486,17 +486,15 @@ class BancaController extends Controller
     public function verificarPago(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'codigo_consulta' => 'nullable|string|max:30',
+            'codigo_transaccion' => 'nullable|string|max:32',
             'referencia_externa' => 'nullable|string|max:100',
-            'placa' => 'nullable|string|max:10',
-            'anio_fiscal' => 'nullable|integer|min:2020|max:2030',
         ]);
 
         // Debe enviar al menos uno
-        if (!$request->filled('codigo_consulta') && !$request->filled('referencia_externa') && !$request->filled('placa')) {
+        if (!$request->filled('codigo_transaccion') && !$request->filled('referencia_externa')) {
             return response()->json([
                 'success' => false,
-                'message' => 'Debe enviar al menos uno: codigo_consulta, referencia_externa, o placa',
+                'message' => 'Debe enviar codigo_transaccion o referencia_externa',
             ], 400);
         }
 
@@ -510,39 +508,33 @@ class BancaController extends Controller
 
         try {
             $transaccion = null;
-            $anioFiscalConsultado = null;
 
-            // Buscar por codigo_consulta (prioridad 1) o referencia externa
-            // (prioridad 2): identifican la TRANSACCIÓN completa.
+            // codigo_transaccion (prioridad 1, criterio principal): el
+            // código corto TRX-XXXXXX. referencia_externa (prioridad 2,
+            // recuperación): para cuando el banco tuvo un timeout y no
+            // llegó a recibir codigo_transaccion — no sabe si el pago se
+            // registró o no (ver idempotencia en el manual). Ya NO se
+            // acepta codigo_consulta ni placa+anio_fiscal como criterio de
+            // este endpoint — codigo_consulta identifica una CONSULTA de
+            // deuda, no un pago, y placa+año podía devolver un año dentro
+            // de una transacción distinta a la que el banco realmente
+            // quería verificar.
             //
-            // Las 3 ramas se acotan a api_token_id === $request->api_token_id
+            // Ambas ramas se acotan a api_token_id === $request->api_token_id
             // (inyectado por ValidateApiToken desde el token autenticado):
             // sin esto, un banco autenticado con SU PROPIO token podía
             // encontrar transacciones de CUALQUIER otra entidad si conocía
-            // o adivinaba su codigo_consulta/referencia_externa/placa+año
-            // (ver auditoría de seguridad) — fuga entre bancos/cooperativas
+            // o adivinaba su codigo_transaccion/referencia_externa (ver
+            // auditoría de seguridad) — fuga entre bancos/cooperativas
             // competidores, no acceso público.
-            if ($request->filled('codigo_consulta')) {
-                $transaccion = TransaccionPago::where('codigo_consulta', $request->codigo_consulta)
+            if ($request->filled('codigo_transaccion')) {
+                $transaccion = TransaccionPago::where('codigo_transaccion', $request->codigo_transaccion)
                     ->where('api_token_id', $request->api_token_id)
                     ->first();
             } elseif ($request->filled('referencia_externa')) {
                 $transaccion = TransaccionPago::where('referencia_externa', $request->referencia_externa)
                     ->where('api_token_id', $request->api_token_id)
                     ->first();
-            }
-            // Buscar por placa + año fiscal (prioridad 3): identifica un AÑO
-            // específico, que puede venir dentro de una transacción con más años.
-            else {
-                $anioFiscalConsultado = $request->anio_fiscal ?? date('Y');
-                $detalle = PagoDetalle::where('placa', strtoupper($request->placa))
-                    ->where('anio_fiscal', $anioFiscalConsultado)
-                    ->whereHas('transaccionPago', function ($q) use ($request) {
-                        $q->where('api_token_id', $request->api_token_id);
-                    })
-                    ->with('transaccionPago')
-                    ->first();
-                $transaccion = $detalle?->transaccionPago;
             }
 
             if (!$transaccion) {
@@ -582,10 +574,6 @@ class BancaController extends Controller
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
                     'placa' => $transaccion->placa,
-                    // Si la búsqueda fue por placa+año, el año consultado puntual
-                    // (para no romper contrato con quien solo espera "este año");
-                    // 'detalles' trae SIEMPRE el desglose completo de la transacción.
-                    'anio_fiscal' => $anioFiscalConsultado,
                     'monto_total' => round((float) $transaccion->monto_total, 2),
                     'anios_cubiertos' => $detalles->count(),
                     'detalles' => $detalles,
