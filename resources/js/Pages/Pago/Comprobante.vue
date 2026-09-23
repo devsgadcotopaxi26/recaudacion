@@ -32,7 +32,7 @@ const imprimir = () => {
 // URL de verificación para el QR
 const urlVerificacion = computed(() => {
   const baseUrl = window.location.origin;
-  return `${baseUrl}/verificar/${props.pago.token_verificacion}`;
+  return `${baseUrl}/verificar/${props.pago.codigo_transaccion}`;
 });
 </script>
 

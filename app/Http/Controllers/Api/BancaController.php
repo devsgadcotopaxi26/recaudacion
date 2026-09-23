@@ -429,10 +429,12 @@ class BancaController extends Controller
                     'comprobante' => $transaccion->comprobante(),
                     // Aditivo (no reemplaza a 'comprobante', que sigue igual):
                     // clave para construir la URL de verificación pública
-                    // (GET /verificar/{token_verificacion}) sin exponer un
+                    // (GET /verificar/{codigo_transaccion}) sin exponer un
                     // identificador secuencial ni depender de
                     // referencia_externa — ver auditoría de seguridad.
-                    'token_verificacion' => $transaccion->token_verificacion,
+                    // Renombrado desde token_verificacion (2026_09_23_130000):
+                    // mismo campo, ningún consumidor real todavía.
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
                     'monto_total_pagado' => round($monto, 2),
                     'anios_pagados' => count($pagosCreados),
                     'fecha_registro' => now()->format('Y-m-d H:i:s'),
