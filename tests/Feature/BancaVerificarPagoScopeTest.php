@@ -73,6 +73,32 @@ class BancaVerificarPagoScopeTest extends TestCase
         $response->assertOk()->assertJson(['success' => true]);
     }
 
+    public function test_respuesta_usa_los_nombres_de_campo_nuevos(): void
+    {
+        $bancoA = $this->crearApiToken('banco_a');
+        $transaccion = $this->crearTransaccionDe($bancoA);
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
+            ->postJson('/api/v1/verificar-pago', ['codigo_transaccion' => $transaccion->codigo_transaccion]);
+
+        $response->assertOk();
+
+        // Nivel general: monto_total_pagado (no monto_total),
+        // anios_pagados (no anios_cubiertos), sin fecha_pago.
+        $response->assertJsonPath('data.monto_total_pagado', 10);
+        $response->assertJsonPath('data.anios_pagados', 1);
+        $response->assertJsonMissingPath('data.monto_total');
+        $response->assertJsonMissingPath('data.anios_cubiertos');
+        $response->assertJsonMissingPath('data.fecha_pago');
+        $response->assertJsonPath('data.fecha_registro', $transaccion->created_at->format('Y-m-d H:i:s'));
+
+        // Nivel detalle: rodaje (no monto_impuesto); monto_total del
+        // detalle se mantiene igual (total del año, no de la transacción).
+        $response->assertJsonPath('data.detalles.0.rodaje', 10);
+        $response->assertJsonPath('data.detalles.0.monto_total', 10);
+        $response->assertJsonMissingPath('data.detalles.0.monto_impuesto');
+    }
+
     public function test_un_banco_rival_no_encuentra_la_transaccion_ajena_por_referencia_externa(): void
     {
         $bancoA = $this->crearApiToken('banco_a');
