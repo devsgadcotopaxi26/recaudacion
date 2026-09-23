@@ -687,7 +687,10 @@ class BancaController extends Controller
                     'anio_fiscal' => $d->anio_fiscal,
                     'monto_total' => round((float) $d->monto_total, 2),
                     'estado' => $d->estado,
-                    'referencia_pago' => $d->transaccionPago->referencia_externa,
+                    // Nombre coherente con registrar-pago/verificar-pago,
+                    // que el banco ya usa como 'referencia_externa' —
+                    // mismo valor, antes con otro nombre ('referencia_pago').
+                    'referencia_externa' => $d->transaccionPago->referencia_externa,
                     'fecha_pago' => $d->transaccionPago->fecha_pago?->format('Y-m-d H:i:s'),
                     'fecha_registro' => $d->created_at->format('Y-m-d H:i:s'),
                 ];

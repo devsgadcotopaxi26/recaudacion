@@ -62,5 +62,13 @@ class BancaReporteConciliacionComprobanteTest extends TestCase
             $response->json('data.detalle_pagos.0.pago_id')
         );
         $this->assertNotSame($transaccion->id, $response->json('data.detalle_pagos.0.pago_id'));
+
+        // referencia_externa (no referencia_pago) — mismo nombre que usa
+        // el banco al mandarlo en registrar-pago/verificar-pago.
+        $this->assertArrayNotHasKey('referencia_pago', $response->json('data.detalle_pagos.0'));
+        $this->assertSame(
+            $transaccion->referencia_externa,
+            $response->json('data.detalle_pagos.0.referencia_externa')
+        );
     }
 }
