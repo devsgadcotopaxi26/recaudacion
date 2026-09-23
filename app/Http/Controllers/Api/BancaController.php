@@ -193,7 +193,6 @@ class BancaController extends Controller
                         'success' => false,
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
                         'pago_existente' => [
-                            'id' => $transaccionExistente->id,
                             'codigo_consulta' => $transaccionExistente->codigo_consulta,
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
                             // no es un dato corrupto ni faltante).
@@ -575,7 +574,10 @@ class BancaController extends Controller
                 'success' => true,
                 'message' => 'Pago encontrado',
                 'data' => [
-                    'transaccion_id' => $transaccion->id,
+                    // transaccion_id (el id crudo) ya no se expone al banco —
+                    // mismo riesgo de enumeración que 'comprobante', sin el
+                    // disfraz del prefijo "PAG-". codigo_transaccion sigue
+                    // siendo la clave pública de verificación.
                     'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),

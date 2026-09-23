@@ -56,10 +56,11 @@ class BancaVerificarPagoScopeTest extends TestCase
             ->postJson('/api/v1/verificar-pago', ['referencia_externa' => 'TXN-DUENIO-0001']);
 
         $response->assertOk()->assertJson(['success' => true]);
-        // 'comprobante' es información interna/contable — ya no se expone
-        // al banco (ver auditoría), aunque comprobante() del modelo y las
-        // vistas internas lo sigan usando normalmente.
+        // 'comprobante' y 'transaccion_id' (el id crudo) son información
+        // interna — ya no se exponen al banco (ver auditoría), aunque el
+        // modelo y las vistas internas los sigan usando normalmente.
         $response->assertJsonMissingPath('data.comprobante');
+        $response->assertJsonMissingPath('data.transaccion_id');
     }
 
     public function test_un_banco_rival_no_encuentra_la_transaccion_ajena_por_referencia_externa(): void
