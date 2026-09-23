@@ -193,8 +193,6 @@ class BancaController extends Controller
                         'success' => false,
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
                         'pago_existente' => [
-                            'id' => $transaccionExistente->id,
-                            'comprobante' => $transaccionExistente->comprobante(),
                             'codigo_consulta' => $transaccionExistente->codigo_consulta,
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
                             // no es un dato corrupto ni faltante).
@@ -423,16 +421,18 @@ class BancaController extends Controller
                 'data' => [
                     'codigo_consulta' => $consulta->codigo_consulta,
                     'placa' => $placa,
-                    // Un solo comprobante para toda la transacción, no uno por
-                    // año — coincide con lo que el ciudadano recibe en la vida
-                    // real en ventanilla (un pago de varios años = un recibo).
-                    'comprobante' => $transaccion->comprobante(),
-                    // Aditivo (no reemplaza a 'comprobante', que sigue igual):
-                    // clave para construir la URL de verificación pública
-                    // (GET /verificar/{token_verificacion}) sin exponer un
-                    // identificador secuencial ni depender de
+                    // 'comprobante' (PAG-XXXXXX) ya NO se expone al banco —
+                    // es información interna/contable; el banco ya tiene
+                    // codigo_transaccion para verificación pública y
+                    // referencia_externa para su propia reconciliación.
+                    // El campo y comprobante() del modelo siguen existiendo
+                    // igual para uso interno (certificados, admin).
+                    //
+                    // codigo_transaccion: clave para construir la URL de
+                    // verificación pública (GET /verificar/{codigo_transaccion})
+                    // sin exponer un identificador secuencial ni depender de
                     // referencia_externa — ver auditoría de seguridad.
-                    'token_verificacion' => $transaccion->token_verificacion,
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
                     'monto_total_pagado' => round($monto, 2),
                     'anios_pagados' => count($pagosCreados),
                     'fecha_registro' => now()->format('Y-m-d H:i:s'),
@@ -486,17 +486,15 @@ class BancaController extends Controller
     public function verificarPago(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'codigo_consulta' => 'nullable|string|max:30',
+            'codigo_transaccion' => 'nullable|string|max:32',
             'referencia_externa' => 'nullable|string|max:100',
-            'placa' => 'nullable|string|max:10',
-            'anio_fiscal' => 'nullable|integer|min:2020|max:2030',
         ]);
 
         // Debe enviar al menos uno
-        if (!$request->filled('codigo_consulta') && !$request->filled('referencia_externa') && !$request->filled('placa')) {
+        if (!$request->filled('codigo_transaccion') && !$request->filled('referencia_externa')) {
             return response()->json([
                 'success' => false,
-                'message' => 'Debe enviar al menos uno: codigo_consulta, referencia_externa, o placa',
+                'message' => 'Debe enviar codigo_transaccion o referencia_externa',
             ], 400);
         }
 
@@ -510,39 +508,33 @@ class BancaController extends Controller
 
         try {
             $transaccion = null;
-            $anioFiscalConsultado = null;
 
-            // Buscar por codigo_consulta (prioridad 1) o referencia externa
-            // (prioridad 2): identifican la TRANSACCIÓN completa.
+            // codigo_transaccion (prioridad 1, criterio principal): el
+            // código corto TRX-XXXXXX. referencia_externa (prioridad 2,
+            // recuperación): para cuando el banco tuvo un timeout y no
+            // llegó a recibir codigo_transaccion — no sabe si el pago se
+            // registró o no (ver idempotencia en el manual). Ya NO se
+            // acepta codigo_consulta ni placa+anio_fiscal como criterio de
+            // este endpoint — codigo_consulta identifica una CONSULTA de
+            // deuda, no un pago, y placa+año podía devolver un año dentro
+            // de una transacción distinta a la que el banco realmente
+            // quería verificar.
             //
-            // Las 3 ramas se acotan a api_token_id === $request->api_token_id
+            // Ambas ramas se acotan a api_token_id === $request->api_token_id
             // (inyectado por ValidateApiToken desde el token autenticado):
             // sin esto, un banco autenticado con SU PROPIO token podía
             // encontrar transacciones de CUALQUIER otra entidad si conocía
-            // o adivinaba su codigo_consulta/referencia_externa/placa+año
-            // (ver auditoría de seguridad) — fuga entre bancos/cooperativas
+            // o adivinaba su codigo_transaccion/referencia_externa (ver
+            // auditoría de seguridad) — fuga entre bancos/cooperativas
             // competidores, no acceso público.
-            if ($request->filled('codigo_consulta')) {
-                $transaccion = TransaccionPago::where('codigo_consulta', $request->codigo_consulta)
+            if ($request->filled('codigo_transaccion')) {
+                $transaccion = TransaccionPago::where('codigo_transaccion', $request->codigo_transaccion)
                     ->where('api_token_id', $request->api_token_id)
                     ->first();
             } elseif ($request->filled('referencia_externa')) {
                 $transaccion = TransaccionPago::where('referencia_externa', $request->referencia_externa)
                     ->where('api_token_id', $request->api_token_id)
                     ->first();
-            }
-            // Buscar por placa + año fiscal (prioridad 3): identifica un AÑO
-            // específico, que puede venir dentro de una transacción con más años.
-            else {
-                $anioFiscalConsultado = $request->anio_fiscal ?? date('Y');
-                $detalle = PagoDetalle::where('placa', strtoupper($request->placa))
-                    ->where('anio_fiscal', $anioFiscalConsultado)
-                    ->whereHas('transaccionPago', function ($q) use ($request) {
-                        $q->where('api_token_id', $request->api_token_id);
-                    })
-                    ->with('transaccionPago')
-                    ->first();
-                $transaccion = $detalle?->transaccionPago;
             }
 
             if (!$transaccion) {
@@ -560,10 +552,13 @@ class BancaController extends Controller
                 'api_token_id' => $request->api_token_id,
             ]);
 
+            // 'rodaje' (no 'monto_impuesto'): coherencia con
+            // consulta-deuda-rodaje-bancos, que ya usa ese nombre para el
+            // mismo concepto.
             $detalles = $transaccion->detalles->map(function ($d) {
                 return [
                     'anio_fiscal' => $d->anio_fiscal,
-                    'monto_impuesto' => round((float) $d->monto_impuesto, 2),
+                    'rodaje' => round((float) $d->monto_impuesto, 2),
                     'monto_mora' => round((float) $d->monto_mora, 2),
                     'monto_total' => round((float) $d->monto_total, 2),
                     'estado' => $d->estado,
@@ -574,22 +569,39 @@ class BancaController extends Controller
                 'success' => true,
                 'message' => 'Pago encontrado',
                 'data' => [
-                    'transaccion_id' => $transaccion->id,
-                    'comprobante' => $transaccion->comprobante(),
+                    // transaccion_id (el id crudo) ya no se expone al banco —
+                    // mismo riesgo de enumeración que 'comprobante', sin el
+                    // disfraz del prefijo "PAG-". codigo_transaccion sigue
+                    // siendo la clave pública de verificación.
                     'codigo_consulta' => $transaccion->codigo_consulta,
+                    // Se confirma de vuelta aunque la búsqueda haya sido por
+                    // referencia_externa — sin esto, buscar por
+                    // referencia_externa devolvía el dato completo pero
+                    // buscar por codigo_transaccion nunca lo confirmaba de
+                    // vuelta (asimetría real entre los 2 criterios válidos).
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
                     'placa' => $transaccion->placa,
-                    // Si la búsqueda fue por placa+año, el año consultado puntual
-                    // (para no romper contrato con quien solo espera "este año");
-                    // 'detalles' trae SIEMPRE el desglose completo de la transacción.
-                    'anio_fiscal' => $anioFiscalConsultado,
-                    'monto_total' => round((float) $transaccion->monto_total, 2),
-                    'anios_cubiertos' => $detalles->count(),
+                    // Nombre coherente con registrar-pago, que ya usa
+                    // 'monto_total_pagado' a nivel general (distinto de
+                    // 'monto_total' dentro de cada fila de 'detalles', que
+                    // es el total de ESE año puntual, no de toda la
+                    // transacción — se deja igual a propósito).
+                    'monto_total_pagado' => round((float) $transaccion->monto_total, 2),
+                    'anios_pagados' => $detalles->count(),
                     'detalles' => $detalles,
                     'estado' => $transaccion->estado,
-                    'referencia_pago' => $transaccion->referencia_externa,
-                    'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
+                    // Nombre coherente con registrar-pago, que el banco ya
+                    // mandó como 'referencia_externa' en el request — antes
+                    // se devolvía con otro nombre ('referencia_pago') para
+                    // el mismo valor.
+                    'referencia_externa' => $transaccion->referencia_externa,
+                    // fecha_pago ya no se expone — para pagos nuevos es
+                    // idéntica a fecha_registro (ver auditoría: el banco
+                    // dejó de poder reportar una fecha_pago propia),
+                    // coherente con registrar-pago, que nunca tuvo este
+                    // campo.
                     'fecha_registro' => $transaccion->created_at->format('Y-m-d H:i:s'),
                     'entidad_recaudadora' => $transaccion->nombreEntidad(),
                 ]
@@ -659,17 +671,26 @@ class BancaController extends Controller
             $pendientes = $pagos->where('estado', 'pendiente');
             $fallidos = $pagos->where('estado', 'fallido');
 
-            // Detalle de cada pago (comprobante y referencia salen de la
-            // transacción — compartidos entre todos los años de un mismo pago).
+            // Detalle de cada pago (referencia sale de la transacción —
+            // compartida entre todos los años de un mismo pago). 'comprobante'
+            // ya no se expone al banco (info interna/contable). 'pago_id'
+            // mantiene su NOMBRE (contrato público documentado, no se
+            // renombra) pero ya no es el id crudo autoincremental — mismo
+            // riesgo de enumeración que comprobante/transaccion_id, sin
+            // ningún disfraz. Ahora lleva codigo_transaccion (formato
+            // TRX-XXXXXX, no adivinable), sigue identificando la
+            // transacción sin ambigüedad para quien consuma el reporte.
             $detalle = $pagos->map(function ($d) {
                 return [
-                    'pago_id' => $d->transaccionPago->id,
-                    'comprobante' => $d->transaccionPago->comprobante(),
+                    'pago_id' => $d->transaccionPago->codigo_transaccion,
                     'placa' => $d->placa,
                     'anio_fiscal' => $d->anio_fiscal,
                     'monto_total' => round((float) $d->monto_total, 2),
                     'estado' => $d->estado,
-                    'referencia_pago' => $d->transaccionPago->referencia_externa,
+                    // Nombre coherente con registrar-pago/verificar-pago,
+                    // que el banco ya usa como 'referencia_externa' —
+                    // mismo valor, antes con otro nombre ('referencia_pago').
+                    'referencia_externa' => $d->transaccionPago->referencia_externa,
                     'fecha_pago' => $d->transaccionPago->fecha_pago?->format('Y-m-d H:i:s'),
                     'fecha_registro' => $d->created_at->format('Y-m-d H:i:s'),
                 ];
@@ -843,11 +864,18 @@ class BancaController extends Controller
     }
 
     /**
-     * Reporte administrativo de conciliación para el GAD
+     * Reporte administrativo de conciliación
      *
-     * Permite ver TODOS los pagos registrados o filtrar por entidad.
-     * A diferencia de /reporte-conciliacion (que solo muestra los pagos
-     * de la entidad autenticada), este muestra todo para comparar.
+     * CORREGIDO (auditoría de seguridad): este endpoint vive bajo el mismo
+     * middleware api.token que el resto de la API bancaria — cualquier
+     * entidad autenticada con SU PROPIO token puede llamarlo, no solo el
+     * GAD. Antes de este fix devolvía los pagos de TODAS las entidades sin
+     * filtrar, permitiendo que un banco viera la conciliación de sus
+     * competidores. Ahora se acota SIEMPRE por api_token_id, igual que
+     * verificarPago() y reporteConciliacion() — en la práctica, un banco ve
+     * exactamente lo mismo aquí que en /reporte-conciliacion (misma
+     * entidad), solo que con el resumen_por_entidad/filtros adicionales
+     * que ya tenía este endpoint.
      *
      * POST /api/v1/admin/reporte-conciliacion
      */
@@ -891,6 +919,10 @@ class BancaController extends Controller
                 'placa' => $request->placa,
                 'anio_fiscal' => $request->anio_fiscal,
                 'codigo_consulta' => $request->codigo_consulta,
+                // Scope obligatorio — ver docblock del método. Sin esto,
+                // cualquier banco veía la conciliación de todas las
+                // entidades.
+                'api_token_id' => $request->api_token_id,
             ]);
 
             $pagos = $query->orderBy('created_at', 'asc')->get();
@@ -903,8 +935,9 @@ class BancaController extends Controller
             // Agrupar por entidad para comparar
             $porEntidad = $service->resumenPorEntidad($pagos);
 
-            // Detalle de cada pago
-            $detalle = $pagos->map(fn($pago) => $service->formatearDetalle($pago));
+            // Detalle de cada pago — variante BANCARIA (sin id crudo ni
+            // comprobante, ver ConciliacionReporteService).
+            $detalle = $pagos->map(fn($pago) => $service->formatearDetalleBancario($pago));
 
             Log::info('API: Reporte admin de conciliación generado', [
                 'solicitado_por' => $request->entidad_nombre,

@@ -34,14 +34,45 @@ class TransaccionPago extends Model
             }
 
             // Identificador de verificación de bajo privilegio (ver
-            // migración 2026_09_22_090000): separado de certificado_token
-            // a propósito — este es para el caso "verificar autenticidad
-            // de un comprobante impreso/QR" (respuesta mínima, sin PII),
-            // certificado_token es para el certificado completo.
-            if (empty($transaccion->token_verificacion)) {
-                $transaccion->token_verificacion = Str::random(32);
+            // create_transacciones_pago_table, columna codigo_transaccion):
+            // separado de certificado_token a propósito — este es para el
+            // caso "verificar autenticidad de un comprobante impreso/QR"
+            // (respuesta mínima, sin PII), certificado_token es para el
+            // certificado completo. Formato corto (TRX-XXXXXX) en vez de
+            // random(32): pensado para tipearse a mano si hace falta,
+            // no solo para escanear QR.
+            if (empty($transaccion->codigo_transaccion)) {
+                $transaccion->codigo_transaccion = self::generarCodigoTransaccion();
             }
         });
+    }
+
+    /**
+     * Alfabeto sin caracteres ambiguos al tipear a mano: sin 0/O, 1/I/L.
+     */
+    private const ALFABETO_CODIGO_TRANSACCION = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+    /**
+     * Genera un código "TRX-XXXXXX" (6 caracteres del alfabeto sin
+     * ambiguos) y reintenta si por casualidad ya existe — 31^6 (~887
+     * millones de combinaciones) hace la colisión extremadamente
+     * improbable, pero la restricción UNIQUE de la columna es la garantía
+     * real; esto solo evita depender de capturar la excepción de la BD
+     * en el camino feliz.
+     */
+    private static function generarCodigoTransaccion(): string
+    {
+        $alfabeto = self::ALFABETO_CODIGO_TRANSACCION;
+        $largo = strlen($alfabeto);
+
+        do {
+            $codigo = 'TRX-';
+            for ($i = 0; $i < 6; $i++) {
+                $codigo .= $alfabeto[random_int(0, $largo - 1)];
+            }
+        } while (self::where('codigo_transaccion', $codigo)->exists());
+
+        return $codigo;
     }
 
     protected $fillable = [
@@ -55,7 +86,7 @@ class TransaccionPago extends Model
         'estado',
         'fecha_pago',
         'certificado_token',
-        'token_verificacion',
+        'codigo_transaccion',
         'link_pago',
         'datos_facturacion',
         'datos_adicionales',

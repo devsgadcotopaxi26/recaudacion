@@ -132,5 +132,49 @@ class RegistrarPagoIntegridadCabeceraDetalleTest extends TestCase
             $transaccion->fecha_pago,
             'fecha_pago debe seguir llenándose server-side (now()) aunque el banco ya no la reporte.'
         );
+
+        // 'comprobante' es información interna/contable — ya no se expone
+        // al banco (ver auditoría), aunque comprobante() del modelo y las
+        // vistas internas lo sigan usando normalmente.
+        $registro->assertJsonMissingPath('data.comprobante');
+    }
+
+    public function test_pago_existente_no_expone_el_id_crudo(): void
+    {
+        // Rama de error "año ya pagado" (pago_existente): 'id' (el id
+        // crudo, sin el disfraz del prefijo PAG- de comprobante) tampoco
+        // debe exponerse al banco — mismo riesgo de enumeración.
+        $token = $this->crearApiToken();
+        $this->fakeSri();
+        $anioActual = (int) date('Y');
+
+        $consulta = $this->withHeaders(['Authorization' => 'Bearer token_estatico_prueba'])
+            ->postJson('/api/v1/consulta-deuda-rodaje-bancos', ['placa' => 'ZZT9999']);
+        $codigoConsulta = $consulta->json('data.codigo_consulta');
+
+        $primerPago = $this->withHeaders(['Authorization' => 'Bearer token_estatico_prueba'])
+            ->postJson('/api/v1/registrar-pago', [
+                'placa' => 'ZZT9999',
+                'codigo_consulta' => $codigoConsulta,
+                'monto' => 10,
+                'referencia_externa' => 'TXN-TEST-DUPLICADO-001',
+            ]);
+        $primerPago->assertStatus(201);
+
+        // Segundo intento sobre el mismo año, ya pagado — dispara la rama
+        // pago_existente. anio_fiscal explícito para que registrarPago()
+        // busque un PagoDetalle 'pagado' de ese año puntual.
+        $intentoDuplicado = $this->withHeaders(['Authorization' => 'Bearer token_estatico_prueba'])
+            ->postJson('/api/v1/registrar-pago', [
+                'placa' => 'ZZT9999',
+                'anio_fiscal' => $anioActual,
+                'codigo_consulta' => $codigoConsulta,
+                'monto' => 10,
+                'referencia_externa' => 'TXN-TEST-DUPLICADO-002',
+            ]);
+
+        $intentoDuplicado->assertStatus(400);
+        $intentoDuplicado->assertJsonPath('pago_existente.codigo_consulta', $codigoConsulta);
+        $intentoDuplicado->assertJsonMissingPath('pago_existente.id');
     }
 }

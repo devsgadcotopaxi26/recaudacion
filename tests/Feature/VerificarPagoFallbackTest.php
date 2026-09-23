@@ -22,11 +22,11 @@ class VerificarPagoFallbackTest extends TestCase
         ]);
     }
 
-    public function test_encuentra_el_pago_por_token_verificacion(): void
+    public function test_encuentra_el_pago_por_codigo_transaccion(): void
     {
         $pago = $this->crearPagoConfirmado();
 
-        $response = $this->get("/verificar/{$pago->token_verificacion}");
+        $response = $this->get("/verificar/{$pago->codigo_transaccion}");
 
         $response->assertInertia(fn ($page) => $page
             ->component('Pago/Verificacion')
@@ -38,7 +38,7 @@ class VerificarPagoFallbackTest extends TestCase
     public function test_referencia_externa_sola_ya_no_encuentra_nada(): void
     {
         // Sin fallback: referencia_externa por sí sola (sin ser también un
-        // token_verificacion válido) debe comportarse igual que un valor
+        // codigo_transaccion válido) debe comportarse igual que un valor
         // que no existe en absoluto.
         $this->crearPagoConfirmado();
 

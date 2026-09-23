@@ -1058,8 +1058,12 @@ class SriVehiculoService
             if ($detalle) {
                 $transaccion = $detalle->transaccionPago;
                 $anio['pago'] = [
-                    'pago_id' => $transaccion->id,
-                    'comprobante' => $transaccion->comprobante(),
+                    // 'pago_id' ya no es el id crudo (enumerable) —
+                    // codigo_transaccion, mismo criterio que
+                    // BancaController::reporteConciliacion() y
+                    // reporteAdminConciliacion(). 'comprobante' (info
+                    // interna/contable) ya no se expone al banco.
+                    'pago_id' => $transaccion->codigo_transaccion,
                     'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),

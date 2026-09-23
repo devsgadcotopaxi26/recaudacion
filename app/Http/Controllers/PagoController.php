@@ -35,7 +35,7 @@ class PagoController extends Controller
             'placa' => $transaccion->placa,
             'referencia_pago' => $transaccion->referencia_externa,
             'certificado_token' => $transaccion->certificado_token,
-            'token_verificacion' => $transaccion->token_verificacion,
+            'codigo_transaccion' => $transaccion->codigo_transaccion,
             'link_pago' => $transaccion->link_pago,
             'estado' => $transaccion->estado,
             'fecha_pago' => $transaccion->fecha_pago,
@@ -367,13 +367,13 @@ class PagoController extends Controller
     public function verificar(string $referencia)
     {
         try {
-            // Única clave válida: token_verificacion (aleatorio, no
-            // adivinable — ver auditoría de seguridad). referencia_externa
+            // Única clave válida: codigo_transaccion (formato TRX-XXXXXX,
+            // no adivinable — ver auditoría de seguridad). referencia_externa
             // la define el banco/pasarela externa y puede ser predecible
             // (ej. un timestamp), no apta como credencial de búsqueda
             // pública. Sin fallback: no hay datos reales en producción
             // todavía, no hace falta mantener compatibilidad con nada viejo.
-            $pago = TransaccionPago::where('token_verificacion', $referencia)->first();
+            $pago = TransaccionPago::where('codigo_transaccion', $referencia)->first();
 
             if (!$pago) {
                 return Inertia::render('Pago/Verificacion', [

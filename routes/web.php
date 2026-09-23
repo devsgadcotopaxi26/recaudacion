@@ -37,6 +37,12 @@ Route::middleware(['throttle:60,1', 'redis.ratelimit'])->group(function () {
     // Rutas de pagos
     Route::get('/pago/facturacion', [PagoController::class, 'facturacion'])->name('pago.facturacion');
     Route::post('/pago/procesar', [PagoController::class, 'procesar'])->name('pago.procesar');
+
+    // Verificación de comprobantes (para QR code): pública, sin auth,
+    // buscando por un código corto (TRX-XXXXXX, ver rename de
+    // token_verificacion) — sin límite era fuerza-bruteable (auditoría
+    // anterior). Mismo límite que el resto de rutas públicas de este grupo.
+    Route::get('/verificar/{referencia}', [PagoController::class, 'verificar'])->name('pago.verificar');
 });
 
 // Rutas de callback y confirmación (sin rate limit estricto)
@@ -54,9 +60,6 @@ Route::get('/comprobante/{pago:certificado_token}', [PagoController::class, 'com
 // entidad recaudadora). Clave de acceso: certificado_token, no referencia_pago
 // (esa la define el banco/cooperativa externo y suele ser secuencial/adivinable).
 Route::get('/certificado/{token}', [PagoController::class, 'certificado'])->name('pago.certificado');
-
-// Ruta de verificación de comprobantes (para QR code)
-Route::get('/verificar/{referencia}', [PagoController::class, 'verificar'])->name('pago.verificar');
 
 // Webhook (sin CSRF, rate limit específico)
 Route::middleware(['throttle:200,1'])->group(function () {
@@ -114,7 +117,15 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
 
         // Verificación de pagos (por comprobante o QR, en una sola pantalla)
         Route::get('/verificar-pago', [PagoVerificacionController::class, 'index'])->name('verificar.index');
-        Route::post('/verificar-pago', [PagoVerificacionController::class, 'verificar'])->name('verificar.buscar');
+        // El POST hace la búsqueda real — sin límite, un admin/sesión
+        // comprometida podía fuerza-brutear referencia_externa o el id
+        // secuencial (ver PagoVerificacionController::buscarTransaccion,
+        // auditoría del rename de token_verificacion). Requiere sesión
+        // autenticada igual (grupo 'auth' arriba), pero eso no reemplaza
+        // un límite de intentos.
+        Route::post('/verificar-pago', [PagoVerificacionController::class, 'verificar'])
+            ->middleware('throttle:60,1')
+            ->name('verificar.buscar');
     });
 
     // Rutas solo para admin - Gestión de usuarios

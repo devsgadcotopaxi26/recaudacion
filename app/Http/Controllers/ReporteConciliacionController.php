@@ -72,9 +72,11 @@ class ReporteConciliacionController extends Controller
             $resumenGeneral = $this->service->resumenGeneral($todosFiltrados);
             $resumenPorEntidad = $this->service->resumenPorEntidad($todosFiltrados);
 
+            // Variante INTERNA (con id real y comprobante) — panel admin,
+            // protegido con sesión + rol, nunca expuesto a bancos.
             $paginador = $query->orderBy('created_at', 'desc')
                 ->paginate(20, ['*'], 'page', $request->integer('page', 1))
-                ->through(fn($pago) => $this->service->formatearDetalle($pago));
+                ->through(fn($pago) => $this->service->formatearDetalleInterno($pago));
 
             Log::info('Admin/ReporteConciliacion: Consulta generada', [
                 'user' => auth()->user()->email,
