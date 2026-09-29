@@ -520,11 +520,20 @@
             </div>
           </div>
 
-          <!-- JSON equivalente de la API (Solo para Admins) -->
-          <details
-            v-if="$page.props.auth.user.roles.some((r) => r.name === 'admin')"
-            class="bg-gray-900 rounded-2xl overflow-hidden"
-          >
+          <!-- JSON equivalente de la API: visible para quien sea que llegue
+               a esta página (ya filtrado por role:admin|verificacionpagos en
+               routes/web.php). Antes tenía v-if="roles.some((r) => r.name
+               === 'admin')" — esa comparación SÍ funcionaba (HandleInertia
+               Requests.php comparte 'roles' vía ->load('roles'), objetos
+               con .name; el array plano de AppServiceProvider.php:62 queda
+               sobreescrito por el share de este middleware, nunca llega al
+               frontend — confirmado en vivo), así que excluía
+               correctamente, por diseño, a 'verificacionpagos'. El problema
+               no era un bug de comparación: es que soporte/ventanilla
+               (verificacionpagos) necesita ver exactamente lo que recibió
+               el banco para diagnosticar reclamos (ver pedido), y ese rol
+               quedaba excluido a propósito. Se quita la restricción.  -->
+          <details class="bg-gray-900 rounded-2xl overflow-hidden">
             <summary
               class="px-6 py-4 text-gray-300 cursor-pointer flex items-center gap-2 hover:text-white transition select-none"
             >
