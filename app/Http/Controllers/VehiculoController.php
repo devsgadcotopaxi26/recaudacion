@@ -76,8 +76,15 @@ class VehiculoController extends Controller
                     'id' => $transaccionPrevia->id,
                     'referencia' => $transaccionPrevia->referencia_externa,
                     'certificado_token' => $transaccionPrevia->certificado_token,
-                    'fecha' => $transaccionPrevia->fecha_pago,
-                    'monto' => $detallePrevio->monto_total,
+                    // Mismo patrón que BancaController::registrarPago() —
+                    // ->format() explícito para no serializar el Carbon
+                    // crudo (ISO 8601 con microsegundos) y (float) explícito
+                    // porque PagoDetalle::monto_total es decimal:2 (string
+                    // sin castear). Ninguno de los dos se usaba en
+                    // Resultado.vue hasta ahora, así que no hay consumidor
+                    // que dependiera del formato viejo.
+                    'fecha' => $transaccionPrevia->fecha_pago?->format('Y-m-d H:i:s'),
+                    'monto' => round((float) $detallePrevio->monto_total, 2),
                 ] : null,
                 'anio_actual' => $anioActual,
             ]);

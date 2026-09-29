@@ -197,9 +197,20 @@ class BancaController extends Controller
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
                             // no es un dato corrupto ni faltante).
                             'registro_historico' => is_null($transaccionExistente->codigo_consulta),
-                            'fecha_pago' => $transaccionExistente->fecha_pago,
+                            // ->format() explícito: sin esto, Carbon (cast
+                            // 'datetime') serializa en ISO 8601 con
+                            // microsegundos, distinto al resto de fechas de
+                            // la API (fecha_registro, expires_at, etc.),
+                            // todas "Y-m-d H:i:s" explícito.
+                            'fecha_pago' => $transaccionExistente->fecha_pago?->format('Y-m-d H:i:s'),
                             'referencia' => $transaccionExistente->referencia_externa,
-                            'monto' => $detalleExistente->monto_total
+                            // (float) explícito: PagoDetalle::monto_total
+                            // tiene cast 'decimal:2', que Laravel siempre
+                            // devuelve como string — sin este cast salía
+                            // "16.95" (string) en vez de 16.95 (número),
+                            // inconsistente con el resto de la API (ver
+                            // verificarPago() en este mismo archivo).
+                            'monto' => round((float) $detalleExistente->monto_total, 2),
                         ]
                     ], 400);
                 }
