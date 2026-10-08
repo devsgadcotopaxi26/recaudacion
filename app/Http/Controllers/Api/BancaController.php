@@ -105,6 +105,24 @@ class BancaController extends Controller
                 ),
             ], 200);
 
+        } catch (\App\Exceptions\SriConsultaIncompletaException $e) {
+            // El SRI entregó datos base y rubros válidos, pero no pudo
+            // completar el desglose por componente ni siquiera tras
+            // reintentar (ver SriVehiculoService) — distinto de una caída
+            // total del SRI (ese caso sigue cayendo en el catch genérico de
+            // abajo, con su propio mensaje). Nunca se sirve un desglose
+            // colapsado/incompleto como si fuera 200 OK.
+            Log::error('API: SRI no pudo entregar el desglose completo de la deuda', [
+                'placa' => $placa,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'error_code' => 'SRI_CONSULTA_INCOMPLETA',
+            ], $e->getCode() ?: 502);
+
         } catch (\Throwable $e) {
             try {
                 Log::error('API: Error al consultar SRI', [
