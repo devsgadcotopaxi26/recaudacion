@@ -406,12 +406,12 @@
                 <tbody class="divide-y divide-gray-100">
                   <tr
                     v-for="item in resultado.desglose_anual"
-                    :key="item.anio"
+                    :key="item.anio_fiscal"
                     class="hover:bg-blue-50/30 transition"
                   >
                     <td class="px-6 py-4">
                       <span class="font-bold text-gray-900 text-base">{{
-                        item.anio
+                        item.anio_fiscal
                       }}</span>
                     </td>
                     <td class="px-6 py-4 text-right">
@@ -422,15 +422,15 @@
                     <td class="px-6 py-4 text-right">
                       <span
                         :class="
-                          item.mora > 0
+                          item.monto_mora > 0
                             ? 'text-orange-600 font-medium'
                             : 'text-gray-400'
                         "
                       >
-                        ${{ formatMoney(item.mora) }}
+                        ${{ formatMoney(item.monto_mora) }}
                       </span>
                       <span
-                        v-if="item.mora > 0"
+                        v-if="item.monto_mora > 0"
                         class="ml-1 inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700 align-middle"
                       >
                         CON MORA
@@ -439,7 +439,7 @@
                     <td class="px-6 py-4 text-right">
                       <span class="font-bold text-gray-900"
                         >${{
-                          formatMoney((item.rodaje || 0) + (item.mora || 0))
+                          formatMoney((item.rodaje || 0) + (item.monto_mora || 0))
                         }}</span
                       >
                     </td>
@@ -468,7 +468,7 @@
                           formatMoney(
                             item.estado === "pagado"
                               ? 0
-                              : (item.rodaje || 0) + (item.mora || 0),
+                              : (item.rodaje || 0) + (item.monto_mora || 0),
                           )
                         }}
                       </span>
@@ -479,10 +479,10 @@
                           {{ item.pago.comprobante }}
                         </p>
                         <p class="text-gray-500">
-                          Ref: {{ item.pago.referencia }}
+                          Ref: {{ item.pago.referencia_externa }}
                         </p>
-                        <p v-if="item.pago.entidad" class="text-gray-500">
-                          {{ item.pago.entidad }}
+                        <p v-if="item.pago.entidad_recaudadora" class="text-gray-500">
+                          {{ item.pago.entidad_recaudadora }}
                         </p>
                         <p v-if="item.pago.fecha_pago" class="text-gray-400">
                           {{ item.pago.fecha_pago }}

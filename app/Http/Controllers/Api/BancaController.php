@@ -159,7 +159,7 @@ class BancaController extends Controller
 
     /**
      * Registrar un pago realizado por entidad bancaria
-     * 
+     *
      * POST /api/v1/registrar-pago
      */
     public function registrarPago(Request $request)
@@ -194,6 +194,7 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Datos inválidos',
+                'error_code' => 'DATOS_INVALIDOS',
                 'errors' => $validator->errors()
             ], 400);
         }
@@ -216,6 +217,7 @@ class BancaController extends Controller
                     return response()->json([
                         'success' => false,
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
+                        'error_code' => 'ANIO_YA_PAGADO',
                         'pago_existente' => [
                             'codigo_consulta' => $transaccionExistente->codigo_consulta,
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
@@ -248,6 +250,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Código de consulta no encontrado. Primero debe consultar la deuda.',
+                    'error_code' => 'CODIGO_CONSULTA_NO_ENCONTRADO',
                 ], 400);
             }
 
@@ -255,6 +258,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Este código de consulta ya fue utilizado para registrar un pago.',
+                    'error_code' => 'CODIGO_CONSULTA_YA_USADO',
                 ], 400);
             }
 
@@ -263,6 +267,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'El código de consulta expiró. Realice una nueva consulta de deuda.',
+                    'error_code' => 'CODIGO_CONSULTA_EXPIRADO',
                 ], 400);
             }
 
@@ -270,6 +275,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'La placa no coincide con la consulta original.',
+                    'error_code' => 'PLACA_NO_COINCIDE',
                 ], 400);
             }
 
@@ -285,13 +291,14 @@ class BancaController extends Controller
 
             // Filtrar solo años pendientes del desglose
             $aniosPendientes = collect($datos['desglose_anual'])->filter(function ($anio) use ($pagosExistentes) {
-                return !in_array($anio['anio'], $pagosExistentes);
+                return !in_array($anio['anio_fiscal'], $pagosExistentes);
             })->values();
 
             if ($aniosPendientes->isEmpty()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No hay años pendientes de pago para esta placa.',
+                    'error_code' => 'SIN_ANIOS_PENDIENTES',
                 ], 400);
             }
 
@@ -313,11 +320,16 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'El monto enviado no coincide con el total a pagar',
+                    'error_code' => 'MONTO_NO_COINCIDE',
                     'monto_enviado' => round($monto, 2),
                     'monto_esperado' => round($montoEsperado, 2),
                     'diferencia' => round($diferencia, 2),
+                    // Claves de salida ('anio'/'valor') sin cambios a
+                    // propósito — este error no está en el alcance de la
+                    // auditoría de nombres, solo se actualizó de dónde se
+                    // leen (desglose_anual ahora usa anio_fiscal/monto_total).
                     'detalle_pendiente' => $aniosAPagar->map(function ($a) {
-                        return ['anio' => $a['anio'], 'valor' => $a['valor']];
+                        return ['anio' => $a['anio_fiscal'], 'valor' => $a['monto_total']];
                     }),
                 ], 400);
             }
@@ -373,10 +385,10 @@ class BancaController extends Controller
                     $detalleCreado = $transaccion->detalles()->create([
                         'placa' => $placa,
                         'estado' => 'pagado',
-                        'anio_fiscal' => $anioPago['anio'],
+                        'anio_fiscal' => $anioPago['anio_fiscal'],
                         'monto_impuesto' => $anioPago['rodaje'] ?? 0,
-                        'monto_mora' => $anioPago['mora'] ?? 0,
-                        'monto_total' => $anioPago['valor'],
+                        'monto_mora' => $anioPago['monto_mora'] ?? 0,
+                        'monto_total' => $anioPago['monto_total'],
                     ]);
 
                     // Suma del valor REALMENTE persistido (no del array
@@ -387,8 +399,8 @@ class BancaController extends Controller
                     $sumaDetalle += (float) $detalleCreado->monto_total;
 
                     $pagosCreados[] = [
-                        'anio_fiscal' => $anioPago['anio'],
-                        'monto' => round($anioPago['valor'], 2),
+                        'anio_fiscal' => $anioPago['anio_fiscal'],
+                        'monto' => round($anioPago['monto_total'], 2),
                     ];
                 }
 
@@ -523,6 +535,7 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Debe enviar codigo_transaccion o referencia_externa',
+                'error_code' => 'CRITERIO_BUSQUEDA_REQUERIDO',
             ], 400);
         }
 
@@ -530,6 +543,7 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Datos inválidos',
+                'error_code' => 'DATOS_INVALIDOS',
                 'errors' => $validator->errors()
             ], 400);
         }
@@ -569,6 +583,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'No se encontró ningún pago con los datos proporcionados',
+                    'error_code' => 'PAGO_NO_ENCONTRADO',
                 ], 404);
             }
 
@@ -635,6 +650,13 @@ class BancaController extends Controller
                     // Siempre presente (null, no ausente) para que el banco
                     // integrador no tenga que chequear si la clave existe:
                     // null = pago vigente, objeto poblado = fue anulado.
+                    // Claves 'fecha_reversion'/'motivo_reversion' (antes
+                    // 'revertido_en'/'revertido_motivo', ver auditoría de
+                    // nombres): consistentes con el patrón 'fecha_*' que ya
+                    // usa el resto de la API (fecha_pago, fecha_registro) y
+                    // con 'motivo_reversion' agregado en revertir-pago —
+                    // cambio seguro, el campo 'reversion' es de hoy, nadie
+                    // lo consume todavía.
                     'reversion' => $transaccion->estado === 'reversado' ? [
                         'fecha_reversion' => $transaccion->revertido_en?->format('Y-m-d H:i:s'),
                         'motivo_reversion' => $transaccion->revertido_motivo,

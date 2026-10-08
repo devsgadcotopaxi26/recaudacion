@@ -774,12 +774,22 @@ class SriVehiculoService
             $valorAnio = round($rodajeAnual + $mora, 2);
 
             $desglose[] = [
-                'anio' => $anio,
+                // 'anio_fiscal' (antes 'anio'): evita colisión de nombre
+                // con vehiculo.anio (año de FABRICACIÓN, un dato
+                // completamente distinto) — dos campos "anio" en la misma
+                // respuesta pública era ambiguo. CAMBIO DISRUPTIVO
+                // (auditoría de nombres): rompe integraciones existentes
+                // de /consulta-deuda-rodaje-bancos a propósito, autorizado
+                // explícitamente. 'monto_total' (antes 'valor') y
+                // 'monto_mora' (antes 'mora') por la misma auditoría —
+                // consistentes con los nombres que ya usan verificar-pago
+                // y los reportes de conciliación.
+                'anio_fiscal' => $anio,
                 'subtotal_matricula' => round($subtotalMatricula, 2),
                 'rodaje' => $rodajeAnual,
                 'anios_atraso' => $aniosAtraso,
-                'mora' => $mora,
-                'valor' => $valorAnio,
+                'monto_mora' => $mora,
+                'monto_total' => $valorAnio,
             ];
 
             $totalRodaje += $rodajeAnual;
@@ -1113,24 +1123,31 @@ class SriVehiculoService
             ->keyBy('anio_fiscal');
 
         $desgloseConEstado = collect($desgloseAnual)->map(function ($anio) use ($pagosExistentes) {
-            $detalle = $pagosExistentes->get($anio['anio']);
+            $detalle = $pagosExistentes->get($anio['anio_fiscal']);
             $anio['estado'] = $detalle ? 'pagado' : 'pendiente';
 
             if ($detalle) {
                 $transaccion = $detalle->transaccionPago;
                 $anio['pago'] = [
-                    // 'pago_id' ya no es el id crudo (enumerable) —
-                    // codigo_transaccion, mismo criterio que
-                    // BancaController::reporteConciliacion() y
-                    // reporteAdminConciliacion(). 'comprobante' (info
-                    // interna/contable) ya no se expone al banco.
-                    'pago_id' => $transaccion->codigo_transaccion,
+                    // Antes 'pago_id': mismo valor exacto que
+                    // codigo_transaccion (ver auditoría), renombrado para
+                    // ser consistente con el nombre que ya usan
+                    // registrar-pago y verificar-pago para este mismo dato
+                    // — no es el id crudo (enumerable) ni un dato nuevo.
+                    // 'comprobante' (info interna/contable) sigue sin
+                    // exponerse al banco.
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
                     'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
-                    'referencia' => $transaccion->referencia_externa,
+                    // 'referencia_externa'/'entidad_recaudadora' (antes
+                    // 'referencia'/'entidad', ver auditoría de nombres):
+                    // mismo dato, consistente con los nombres que ya usan
+                    // registrar-pago y verificar-pago — este sub-objeto era
+                    // el único lugar donde el renombre nunca se completó.
+                    'referencia_externa' => $transaccion->referencia_externa,
                     'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
-                    'entidad' => $transaccion->nombreEntidad(),
+                    'entidad_recaudadora' => $transaccion->nombreEntidad(),
                 ];
             }
 
@@ -1144,8 +1161,8 @@ class SriVehiculoService
             'todos_pagados' => $aniosPendientes->isEmpty(),
             'totales_pendientes' => [
                 'total_rodaje' => round($aniosPendientes->sum('rodaje'), 2),
-                'total_mora' => round($aniosPendientes->sum('mora'), 2),
-                'total_a_pagar' => round($aniosPendientes->sum('valor'), 2),
+                'total_mora' => round($aniosPendientes->sum('monto_mora'), 2),
+                'total_a_pagar' => round($aniosPendientes->sum('monto_total'), 2),
             ],
         ];
     }

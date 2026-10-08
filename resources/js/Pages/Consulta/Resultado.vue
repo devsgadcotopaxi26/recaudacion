@@ -179,20 +179,20 @@ const iniciarPago = () => {
               <tbody>
                 <tr
                   v-for="anio in vehiculo.desglose_anual"
-                  :key="anio.anio"
+                  :key="anio.anio_fiscal"
                   class="border-b last:border-0"
                 >
                   <td class="py-2 pr-4 font-medium text-gray-900">
-                    {{ anio.anio }}
+                    {{ anio.anio_fiscal }}
                   </td>
                   <td class="py-2 pr-4 text-gray-700">
                     {{ formatCurrency(anio.rodaje) }}
                   </td>
                   <td class="py-2 pr-4 text-gray-700">
-                    {{ formatCurrency(anio.mora) }}
+                    {{ formatCurrency(anio.monto_mora) }}
                   </td>
                   <td class="py-2 text-right font-semibold text-gray-900">
-                    {{ formatCurrency(anio.valor) }}
+                    {{ formatCurrency(anio.monto_total) }}
                   </td>
                 </tr>
               </tbody>
