@@ -167,6 +167,12 @@ class BancaController extends Controller
         // Validar request
         $validator = Validator::make($request->all(), [
             'placa' => 'required|string|max:10',
+            // PURAMENTE INFORMATIVO (ver auditoría de negocio): solo se usa
+            // más abajo para un chequeo temprano de "¿ya pagó este año
+            // puntual?" (devuelve pago_existente si aplica). NUNCA debe
+            // volver a decidir qué años entran en $aniosAPagar / monto a
+            // cobrar — el pago siempre es consolidado, todos los años
+            // pendientes en una sola transacción, sin excepción.
             'anio_fiscal' => 'nullable|integer|min:2020|max:2030',
             'monto' => 'required|numeric|min:0.01',
             'codigo_consulta' => 'required|string|max:30',
@@ -289,23 +295,16 @@ class BancaController extends Controller
                 ], 400);
             }
 
-            $totalPendiente = round($aniosPendientes->sum('valor'), 2);
-
-            // Determinar si paga un año específico o todos los pendientes
-            $aniosAPagar = collect();
-            if ($aniosPendientes->count() === 1) {
-                // Solo un año pendiente, el monto debe coincidir
-                $aniosAPagar = $aniosPendientes;
-                $montoEsperado = $totalPendiente;
-            } elseif ($anioFiscal && $aniosPendientes->where('anio', $anioFiscal)->isNotEmpty()) {
-                // Paga un año específico
-                $aniosAPagar = $aniosPendientes->where('anio', $anioFiscal)->values();
-                $montoEsperado = round($aniosAPagar->sum('valor'), 2);
-            } else {
-                // Paga todos los pendientes
-                $aniosAPagar = $aniosPendientes;
-                $montoEsperado = $totalPendiente;
-            }
+            // Regla de negocio NO NEGOCIABLE: un pago siempre cubre el TOTAL
+            // de la deuda pendiente (todos los años, del más antiguo al
+            // actual) en una sola operación — nunca un solo año seleccionado
+            // a propósito, aunque haya varios pendientes. anio_fiscal (abajo)
+            // es puramente informativo para el chequeo de duplicado temprano;
+            // nunca debe influir en qué se cobra aquí (ver auditoría: antes
+            // había una rama que sí dejaba elegir un año específico vía
+            // anio_fiscal, dejando el resto sin cobrar — eliminada).
+            $aniosAPagar = $aniosPendientes;
+            $montoEsperado = round($aniosPendientes->sum('monto_total'), 2);
 
             // Verificar que el monto sea correcto (tolerancia de $1.00)
             $diferencia = abs($monto - $montoEsperado);
