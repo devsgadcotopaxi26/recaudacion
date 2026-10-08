@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 
 /**
@@ -73,6 +74,42 @@ class TransaccionPago extends Model
         } while (self::where('codigo_transaccion', $codigo)->exists());
 
         return $codigo;
+    }
+
+    /**
+     * El exists() de generarCodigoTransaccion() y el INSERT real son dos
+     * pasos separados — ventana de carrera (TOCTOU) teórica: dos requests
+     * concurrentes podrían generar el mismo código, pasar ambos el
+     * exists() (ninguno ve al otro todavía) y el segundo INSERT violaría
+     * el UNIQUE de la columna. La BD ya garantiza que nunca se persiste
+     * un duplicado (eso no cambia); esto solo evita que ese caso le
+     * devuelva un 500 al banco — se regenera el código y se reintenta el
+     * insert una vez más antes de rendirse. Extremadamente improbable
+     * (31^6 ≈ 887M combinaciones), por eso el límite de reintentos es
+     * bajo (1) en vez de un loop sin fin.
+     */
+    public function save(array $options = [])
+    {
+        $intentos = 0;
+        $maxIntentos = 2; // intento inicial + 1 reintento
+
+        while (true) {
+            try {
+                return parent::save($options);
+            } catch (QueryException $e) {
+                $intentos++;
+
+                $esColisionCodigoTransaccion = !$this->exists
+                    && $e->getCode() === '23000'
+                    && str_contains($e->getMessage(), 'codigo_transaccion');
+
+                if (!$esColisionCodigoTransaccion || $intentos >= $maxIntentos) {
+                    throw $e;
+                }
+
+                $this->codigo_transaccion = self::generarCodigoTransaccion();
+            }
+        }
     }
 
     protected $fillable = [
