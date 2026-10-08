@@ -90,6 +90,9 @@ class TransaccionPago extends Model
         'link_pago',
         'datos_facturacion',
         'datos_adicionales',
+        'revertido_en',
+        'revertido_motivo',
+        'revertido_por_api_token_id',
     ];
 
     protected $casts = [
@@ -97,6 +100,7 @@ class TransaccionPago extends Model
         'fecha_pago' => 'datetime',
         'datos_facturacion' => 'array',
         'datos_adicionales' => 'array',
+        'revertido_en' => 'datetime',
     ];
 
     public function detalles(): HasMany
@@ -197,6 +201,58 @@ class TransaccionPago extends Model
     public function estaPendiente(): bool
     {
         return $this->estado === 'pendiente';
+    }
+
+    /**
+     * Ventana de reversión bancaria: solo dentro de las 24h posteriores al
+     * registro (created_at, nunca fecha_pago — mismo criterio ya usado para
+     * la ventana de codigo_consulta, ver BancaController::registrarPago()).
+     * No basta con 'pagado': un pago ya reversado, fallido o expirado
+     * tampoco puede revertirse de nuevo.
+     */
+    public function puedeRevertirse(): bool
+    {
+        // $absolute=true explícito: desde Carbon 3, diffInHours() ya NO es
+        // absoluto por defecto — sin esto, now()->diffInHours(pasado) da
+        // NEGATIVO (ej. -25 para un pago de hace 25h), y "-25 <= 24" es
+        // SIEMPRE true, permitiendo revertir sin límite de tiempo real.
+        return $this->estado === 'pagado'
+            && now()->diffInHours($this->created_at, true) <= 24;
+    }
+
+    /**
+     * Revierte un pago bancario completo (cabecera + todos sus detalles,
+     * nunca parcial — regla de negocio). Mismo patrón de propagación que
+     * PaymentGatewayService::procesarWebhook() usa para el canal
+     * pasarela_ciudadana (estado='reversado' en cabecera y detalles),
+     * aquí con metadata de auditoría adicional porque el canal bancario
+     * exige saber quién/cuándo/por qué (la pasarela se reversa por webhook
+     * automático, sin un banco identificable detrás).
+     *
+     * No valida aquí si puedeRevertirse() — el llamador (BancaController)
+     * ya debe haberlo chequeado para devolver el error_code específico
+     * (PAGO_YA_ANULADO vs. FUERA_DE_VENTANA_REVERSION); este método solo
+     * ejecuta el cambio de estado de forma atómica.
+     */
+    public function revertir(int $apiTokenId, string $motivo): void
+    {
+        \Illuminate\Support\Facades\DB::transaction(function () use ($apiTokenId, $motivo) {
+            $this->update([
+                'estado' => 'reversado',
+                'revertido_en' => now(),
+                'revertido_motivo' => $motivo,
+                'revertido_por_api_token_id' => $apiTokenId,
+            ]);
+
+            $this->detalles()->update(['estado' => 'reversado']);
+        });
+
+        // Mismo criterio que marcarComoPagado() (ver docblock de ese
+        // método): sin esto, la próxima consulta de deuda seguiría
+        // mostrando el año como pagado hasta que expire el TTL del caché,
+        // aunque conciliarPagosLocales() ya no encuentre el detalle en
+        // estado 'pagado'.
+        \Illuminate\Support\Facades\Cache::forget("sri_full_v3_{$this->placa}");
     }
 
     private function registrarEstadisticasRecaudacion(): void

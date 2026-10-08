@@ -615,6 +615,13 @@ class BancaController extends Controller
                     // campo.
                     'fecha_registro' => $transaccion->created_at->format('Y-m-d H:i:s'),
                     'entidad_recaudadora' => $transaccion->nombreEntidad(),
+                    // Siempre presente (null, no ausente) para que el banco
+                    // integrador no tenga que chequear si la clave existe:
+                    // null = pago vigente, objeto poblado = fue anulado.
+                    'reversion' => $transaccion->estado === 'reversado' ? [
+                        'fecha_reversion' => $transaccion->revertido_en?->format('Y-m-d H:i:s'),
+                        'motivo_reversion' => $transaccion->revertido_motivo,
+                    ] : null,
                 ]
             ], 200);
 
@@ -626,6 +633,114 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error al consultar el pago',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
+            ], 500);
+        }
+    }
+
+    /**
+     * Revertir un pago bancario ya registrado (placa incorrecta, monto
+     * incorrecto, duplicado, etc.). Siempre total sobre la transacción
+     * completa (todos los años que cubrió ese codigo_transaccion) — no se
+     * admite revertir solo uno de los años de un pago multi-año. El
+     * codigo_consulta original NO se reutiliza: si el banco quiere volver
+     * a pagar, debe hacer una consulta nueva (consulta_bancarias no se
+     * toca aquí).
+     *
+     * POST /api/v1/revertir-pago
+     */
+    public function revertirPago(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'codigo_transaccion' => 'required|string|max:32',
+            'motivo' => 'required|string|min:10',
+        ], [
+            'codigo_transaccion.required' => 'El código de transacción es obligatorio',
+            'motivo.required' => 'El motivo de la reversión es obligatorio',
+            'motivo.min' => 'El motivo debe tener al menos 10 caracteres',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos',
+                'error_code' => 'DATOS_INVALIDOS',
+                'errors' => $validator->errors()
+            ], 400);
+        }
+
+        try {
+            // Acotado a api_token_id === $request->api_token_id (inyectado
+            // por ValidateApiToken desde el token autenticado) — mismo
+            // patrón que verificarPago(): un banco nunca puede ver ni
+            // revertir transacciones de otra entidad, ni siquiera para
+            // enterarse de que existen.
+            $transaccion = TransaccionPago::where('codigo_transaccion', $request->codigo_transaccion)
+                ->where('api_token_id', $request->api_token_id)
+                ->first();
+
+            if (!$transaccion) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No se encontró ningún pago con los datos proporcionados',
+                    'error_code' => 'PAGO_NO_ENCONTRADO',
+                ], 404);
+            }
+
+            if ($transaccion->estado !== 'pagado') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Este pago no puede revertirse porque su estado actual es "' . $transaccion->estado . '"',
+                    'error_code' => 'PAGO_YA_ANULADO',
+                ], 400);
+            }
+
+            if (!$transaccion->puedeRevertirse()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El pago ya no puede revertirse: pasaron más de 24 horas desde su registro',
+                    'error_code' => 'FUERA_DE_VENTANA_REVERSION',
+                    // absolute=true explícito — mismo motivo que
+                    // TransaccionPago::puedeRevertirse() (Carbon 3 cambió
+                    // el default y devuelve negativo si no se especifica).
+                    'horas_transcurridas' => now()->diffInHours($transaccion->created_at, true),
+                ], 400);
+            }
+
+            $transaccion->revertir($request->api_token_id, $request->motivo);
+
+            Log::info('API: Pago revertido', [
+                'transaccion_pago_id' => $transaccion->id,
+                'codigo_transaccion' => $transaccion->codigo_transaccion,
+                'entidad' => $request->entidad_nombre,
+                'api_token_id' => $request->api_token_id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pago revertido correctamente',
+                'data' => [
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
+                    'estado' => $transaccion->estado,
+                    'fecha_reversion' => $transaccion->revertido_en?->format('Y-m-d H:i:s'),
+                    // Agregado (auditoría de nombres): antes la respuesta
+                    // confirmaba la reversión pero no devolvía el motivo
+                    // que el banco acaba de enviar — tenía que llamar
+                    // aparte a verificar-pago para verlo reflejado.
+                    'motivo_reversion' => $transaccion->revertido_motivo,
+                    'placa' => $transaccion->placa,
+                    'monto_revertido' => round((float) $transaccion->monto_total, 2),
+                ],
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('API: Error al revertir pago', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al revertir el pago',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
             ], 500);
         }

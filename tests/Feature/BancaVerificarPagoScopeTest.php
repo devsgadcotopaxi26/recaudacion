@@ -172,4 +172,44 @@ class BancaVerificarPagoScopeTest extends TestCase
 
         $response->assertStatus(400);
     }
+
+    public function test_un_pago_vigente_devuelve_reversion_null_explicito(): void
+    {
+        $bancoA = $this->crearApiToken('banco_a');
+        $transaccion = $this->crearTransaccionDe($bancoA);
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
+            ->postJson('/api/v1/verificar-pago', ['codigo_transaccion' => $transaccion->codigo_transaccion]);
+
+        $response->assertOk();
+        // null EXPLÍCITO (la clave debe existir, no estar ausente) — el
+        // banco integrador no debe tener que chequear si existe la clave.
+        $response->assertJsonPath('data.reversion', null);
+        $this->assertArrayHasKey('reversion', $response->json('data'));
+    }
+
+    public function test_un_pago_revertido_devuelve_el_objeto_reversion_poblado(): void
+    {
+        $bancoA = $this->crearApiToken('banco_a');
+        $transaccion = $this->crearTransaccionDe($bancoA);
+        $transaccion->revertir($bancoA->id, 'Placa digitada incorrectamente por el cajero');
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
+            ->postJson('/api/v1/verificar-pago', ['codigo_transaccion' => $transaccion->codigo_transaccion]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.estado', 'reversado');
+        // Claves 'fecha_reversion'/'motivo_reversion' (antes
+        // 'revertido_en'/'revertido_motivo', ver auditoría de nombres) —
+        // $transaccion->revertido_en sigue siendo el nombre de la columna
+        // en el modelo/BD, no cambió, solo la clave JSON de salida.
+        $response->assertJsonPath(
+            'data.reversion.fecha_reversion',
+            $transaccion->revertido_en->format('Y-m-d H:i:s')
+        );
+        $response->assertJsonPath(
+            'data.reversion.motivo_reversion',
+            'Placa digitada incorrectamente por el cajero'
+        );
+    }
 }
