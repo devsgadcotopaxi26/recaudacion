@@ -43,6 +43,9 @@ Route::prefix('v1')->group(function () {
         // Reporte de conciliación (pagos por entidad en rango de fechas)
         Route::post('/reporte-conciliacion', [BancaController::class, 'reporteConciliacion']);
 
+        // Revertir un pago bancario ya registrado (ventana de 24h)
+        Route::post('/revertir-pago', [BancaController::class, 'revertirPago']);
+
         // ─── ADMIN: Reporte para el GAD ──────────────────────────────
         // Reporte completo de todas las entidades (para conciliar desde el GAD)
         Route::post('/admin/reporte-conciliacion', [BancaController::class, 'reporteAdminConciliacion']);

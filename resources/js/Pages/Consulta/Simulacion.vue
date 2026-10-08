@@ -148,16 +148,16 @@ const ejecutarSimulacion = async () => {
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200 bg-white">
-                      <tr v-for="item in resultado.data.desglose_anual" :key="item.anio" class="hover:bg-blue-50/50 transition-colors">
-                        <td class="px-6 py-4 text-sm font-black text-gray-900 bg-gray-50/50">{{ item.anio }}</td>
+                      <tr v-for="item in resultado.data.desglose_anual" :key="item.anio_fiscal" class="hover:bg-blue-50/50 transition-colors">
+                        <td class="px-6 py-4 text-sm font-black text-gray-900 bg-gray-50/50">{{ item.anio_fiscal }}</td>
                         <td class="px-6 py-4 text-sm text-right font-medium text-gray-700">{{ formatCurrency(item.subtotal_matricula) }}</td>
                         <td class="px-6 py-4 text-sm text-right font-bold text-primary-600">{{ formatCurrency(item.rodaje) }}</td>
                         <td class="px-6 py-4 text-sm text-right text-gray-500">{{ item.anios_atraso }}</td>
-                        <td class="px-6 py-4 text-sm text-right font-bold" :class="item.mora > 0 ? 'text-red-500' : 'text-gray-300'">
-                          {{ formatCurrency(item.mora) }}
+                        <td class="px-6 py-4 text-sm text-right font-bold" :class="item.monto_mora > 0 ? 'text-red-500' : 'text-gray-300'">
+                          {{ formatCurrency(item.monto_mora) }}
                         </td>
                         <td class="px-6 py-4 text-sm text-right font-black text-gray-900 border-l border-gray-50">
-                          {{ formatCurrency(item.valor) }}
+                          {{ formatCurrency(item.monto_total) }}
                         </td>
                       </tr>
                     </tbody>

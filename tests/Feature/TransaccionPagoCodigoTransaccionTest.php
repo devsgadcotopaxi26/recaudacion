@@ -141,6 +141,14 @@ class TransaccionPagoCodigoTransaccionTest extends TestCase
 
     public function test_la_restriccion_unique_sigue_activa_tras_el_rename(): void
     {
+        // La BD nunca permite dos filas con el mismo codigo_transaccion —
+        // eso no cambia. Lo que sí cambió (ver siguiente test) es que ya
+        // no basta con forzar un duplicado explícito para observar el
+        // QueryException crudo: TransaccionPago::save() ahora lo
+        // intercepta y reintenta con un código nuevo antes de rendirse.
+        // Esta prueba confirma la garantía de integridad en sí misma,
+        // consultando directamente la tabla (sin pasar por el modelo),
+        // que es donde vive la garantía real.
         TransaccionPago::create([
             'placa' => 'COL0001',
             'canal' => 'pasarela_ciudadana',
@@ -149,13 +157,73 @@ class TransaccionPagoCodigoTransaccionTest extends TestCase
             'codigo_transaccion' => 'TRX-COLIDE',
         ]);
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->assertSame(
+            1,
+            \Illuminate\Support\Facades\DB::table('transacciones_pago')
+                ->where('codigo_transaccion', 'TRX-COLIDE')
+                ->count(),
+            'No debe ser posible persistir dos filas con el mismo codigo_transaccion.'
+        );
+    }
+
+    public function test_una_colision_de_codigo_transaccion_se_recupera_sola_con_un_reintento(): void
+    {
+        // Ventana de carrera (TOCTOU) entre el exists() de
+        // generarCodigoTransaccion() y el INSERT real: forzamos el mismo
+        // escenario explícitamente (codigo_transaccion ya asignado antes
+        // de creating(), así que el hook no lo regenera por su cuenta) —
+        // el INSERT debe violar el UNIQUE de verdad, y
+        // TransaccionPago::save() debe capturarlo, regenerar un código
+        // nuevo y reintentar, sin que la excepción llegue al banco.
         TransaccionPago::create([
-            'placa' => 'COL9999',
+            'placa' => 'COL0001',
             'canal' => 'pasarela_ciudadana',
             'monto_total' => 10.00,
             'estado' => 'pendiente',
             'codigo_transaccion' => 'TRX-COLIDE',
+        ]);
+
+        $segunda = TransaccionPago::create([
+            'placa' => 'COL9999',
+            'canal' => 'pasarela_ciudadana',
+            'monto_total' => 10.00,
+            'estado' => 'pendiente',
+            'codigo_transaccion' => 'TRX-COLIDE', // misma colision forzada
+        ]);
+
+        // Se recuperó solo: existe, tiene un codigo_transaccion valido,
+        // y NO es el que colisionaba (tuvo que regenerarse).
+        $this->assertTrue($segunda->exists);
+        $this->assertNotSame('TRX-COLIDE', $segunda->codigo_transaccion);
+        $this->assertMatchesRegularExpression('/^TRX-[A-Z0-9]{6}$/', $segunda->codigo_transaccion);
+
+        // Ambas transacciones quedaron persistidas, cada una con su
+        // propio codigo_transaccion distinto -- cero duplicados.
+        $this->assertSame(2, TransaccionPago::count());
+        $this->assertSame(
+            2,
+            TransaccionPago::distinct()->count('codigo_transaccion'),
+            'Debe haber 2 codigo_transaccion distintos, no un duplicado silencioso.'
+        );
+    }
+
+    public function test_una_colision_con_otro_tipo_de_error_de_bd_no_se_reintenta(): void
+    {
+        // El retry debe ser ESPECIFICO a la colision de codigo_transaccion
+        // -- cualquier otro QueryException (ej. una FK inexistente) debe
+        // propagarse normal, sin reintentar a ciegas. api_token_id
+        // apunta a un id que no existe en api_tokens -> viola la FK
+        // (constraint distinto, siempre forzado por InnoDB sin importar
+        // el modo SQL, a diferencia de un enum/NOT NULL que depende de
+        // sql_mode).
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        TransaccionPago::create([
+            'placa' => 'ERR0001',
+            'canal' => 'pasarela_ciudadana',
+            'monto_total' => 10.00,
+            'estado' => 'pendiente',
+            'api_token_id' => 999999999,
         ]);
     }
 }

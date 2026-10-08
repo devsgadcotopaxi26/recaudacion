@@ -175,34 +175,71 @@ class SriVehiculoService
                         if ($codigoRubro) {
                             $urlComponentes = 'https://srienlinea.sri.gob.ec/sri-matriculacion-vehicular-recaudacion-servicio-internet/rest/ConsultaComponente/obtenerListaComponentesPorCodigoConsultaRubro';
                             Log::info('SRI: Obteniendo componentes del rubro para desglose', ['codigoRubro' => $codigoRubro]);
+
+                            // Antes este try/catch absorbía CUALQUIER fallo
+                            // (timeout, 5xx, red) y dejaba $detallesRubro
+                            // vacío en silencio — eso disparaba el fallback
+                            // de abajo, que colapsa TODOS los años del rubro
+                            // en uno solo con el valor total. Con
+                            // codigoRubro presente, el SRI está prometiendo
+                            // un desglose real: si no lo puede entregar, es
+                            // una FALLA, no un caso legítimo de "sin
+                            // desglose" (eso es cuando codigoRubro ya viene
+                            // null desde ConsultaRubros). Por eso ahora se
+                            // relanza como SriConsultaIncompletaException,
+                            // que escala al mismo mecanismo de reintentos
+                            // que ya usan BaseVehiculo/ConsultaRubros (el
+                            // catch de la línea ~278, misma vuelta del for).
                             try {
                                 $responseComps = Http::timeout($this->timeout)->get($urlComponentes, ['codigoConsultaRubro' => $codigoRubro]);
-                                if ($responseComps->successful()) {
-                                    $dataComps = $responseComps->json();
-
-                                    Log::channel('sri')->info('SRI: Response ComponentesRubro JSON', [
-                                        'codigoRubro' => $codigoRubro,
-                                        'body' => $dataComps
-                                    ]);
-
-                                    if (is_array($dataComps)) {
-                                        foreach ($dataComps as $comp) {
-                                            $detallesRubro[] = [
-                                                'anio' => intval($comp['anioFiscal'] ?? $anioHasta),
-                                                'valor' => floatval($comp['valorComponente'] ?? 0),
-                                                'descripcionComponente' => $comp['nombreComponente'] ?? 'Mapeado',
-                                            ];
-                                        }
-                                    }
-                                }
-                            } catch (\Exception $e) {
-                                Log::warning('SRI: Error consultando componentes del rubro', [
+                            } catch (\Throwable $e) {
+                                Log::error('SRI: Error de conexión al obtener componentes del rubro', [
                                     'codigoRubro' => $codigoRubro,
-                                    'error' => $e->getMessage()
+                                    'error' => $e->getMessage(),
                                 ]);
+                                throw new \App\Exceptions\SriConsultaIncompletaException(previous: $e);
+                            }
+
+                            if (!$responseComps->successful()) {
+                                Log::error('SRI: Error al obtener componentes del rubro', [
+                                    'codigoRubro' => $codigoRubro,
+                                    'status' => $responseComps->status(),
+                                    'body' => $responseComps->body(),
+                                ]);
+                                throw new \App\Exceptions\SriConsultaIncompletaException();
+                            }
+
+                            $dataComps = $responseComps->json();
+
+                            // Una falla del logger NO debe interrumpir una
+                            // respuesta válida del SRI (mismo criterio que
+                            // el resto de logs de este método).
+                            try {
+                                Log::channel('sri')->info('SRI: Response ComponentesRubro JSON', [
+                                    'codigoRubro' => $codigoRubro,
+                                    'body' => $dataComps
+                                ]);
+                            } catch (\Throwable $logError) {
+                            }
+
+                            if (is_array($dataComps)) {
+                                foreach ($dataComps as $comp) {
+                                    $detallesRubro[] = [
+                                        'anio' => intval($comp['anioFiscal'] ?? $anioHasta),
+                                        'valor' => floatval($comp['valorComponente'] ?? 0),
+                                        'descripcionComponente' => $comp['nombreComponente'] ?? 'Mapeado',
+                                    ];
+                                }
                             }
                         }
 
+                        // Solo se llega aquí sin haber lanzado
+                        // SriConsultaIncompletaException, así que esto ya
+                        // nunca colapsa un fallo de ConsultaComponente:
+                        // o bien codigoRubro venía null desde el inicio
+                        // (caso legítimo, el SRI nunca prometió desglose),
+                        // o bien sí vino pero la respuesta fue exitosa con
+                        // cero componentes (también legítimo, no es falla).
                         if (empty($detallesRubro)) {
                             $detallesRubro[] = [
                                 'anio' => $anioHasta,
@@ -288,6 +325,21 @@ class SriVehiculoService
                 // ── Error transitorio (5xx, red, timeout): reintentar ──
                 $esUltimoIntento = ($intento === $intentosTotales);
                 if ($esUltimoIntento) {
+                    // ConsultaComponente agotó los reintentos: se relanza
+                    // TAL CUAL (ya trae su propio código 502 y mensaje
+                    // específico de "desglose incompleto") en vez de
+                    // envolverla en el mensaje genérico de abajo — son
+                    // fallas distintas (esta SÍ tiene datos base/rubros
+                    // válidos, solo falta el desglose por componente) y el
+                    // banco necesita poder distinguirlas.
+                    if ($e instanceof \App\Exceptions\SriConsultaIncompletaException) {
+                        Log::error('SRI: Agotados los reintentos obteniendo el desglose por componente', [
+                            'placa' => $placa,
+                            'intentos' => $intento,
+                        ]);
+                        throw $e;
+                    }
+
                     Log::error('SRI: Agotados todos los reintentos', [
                         'placa' => $placa,
                         'intentos' => $intento,
@@ -722,12 +774,22 @@ class SriVehiculoService
             $valorAnio = round($rodajeAnual + $mora, 2);
 
             $desglose[] = [
-                'anio' => $anio,
+                // 'anio_fiscal' (antes 'anio'): evita colisión de nombre
+                // con vehiculo.anio (año de FABRICACIÓN, un dato
+                // completamente distinto) — dos campos "anio" en la misma
+                // respuesta pública era ambiguo. CAMBIO DISRUPTIVO
+                // (auditoría de nombres): rompe integraciones existentes
+                // de /consulta-deuda-rodaje-bancos a propósito, autorizado
+                // explícitamente. 'monto_total' (antes 'valor') y
+                // 'monto_mora' (antes 'mora') por la misma auditoría —
+                // consistentes con los nombres que ya usan verificar-pago
+                // y los reportes de conciliación.
+                'anio_fiscal' => $anio,
                 'subtotal_matricula' => round($subtotalMatricula, 2),
                 'rodaje' => $rodajeAnual,
                 'anios_atraso' => $aniosAtraso,
-                'mora' => $mora,
-                'valor' => $valorAnio,
+                'monto_mora' => $mora,
+                'monto_total' => $valorAnio,
             ];
 
             $totalRodaje += $rodajeAnual;
@@ -788,6 +850,15 @@ class SriVehiculoService
 
                 try {
                     $detalleBase = $this->obtenerDetalleCompleto($placa);
+                } catch (\App\Exceptions\SriConsultaIncompletaException $e) {
+                    // Distinto de un fallo transitorio genérico: el SRI SÍ
+                    // respondió (base + rubros válidos), solo no pudo
+                    // completar el desglose por componente tras agotar los
+                    // reintentos. Propagar tal cual (código 502 y mensaje
+                    // propios) — envolverla en el "503 SRI no disponible"
+                    // de abajo perdería esa distinción y confundiría al
+                    // banco con un mensaje que no aplica aquí.
+                    throw $e;
                 } catch (Exception $e) {
                     $codigo = (int) $e->getCode();
 
@@ -1052,24 +1123,31 @@ class SriVehiculoService
             ->keyBy('anio_fiscal');
 
         $desgloseConEstado = collect($desgloseAnual)->map(function ($anio) use ($pagosExistentes) {
-            $detalle = $pagosExistentes->get($anio['anio']);
+            $detalle = $pagosExistentes->get($anio['anio_fiscal']);
             $anio['estado'] = $detalle ? 'pagado' : 'pendiente';
 
             if ($detalle) {
                 $transaccion = $detalle->transaccionPago;
                 $anio['pago'] = [
-                    // 'pago_id' ya no es el id crudo (enumerable) —
-                    // codigo_transaccion, mismo criterio que
-                    // BancaController::reporteConciliacion() y
-                    // reporteAdminConciliacion(). 'comprobante' (info
-                    // interna/contable) ya no se expone al banco.
-                    'pago_id' => $transaccion->codigo_transaccion,
+                    // Antes 'pago_id': mismo valor exacto que
+                    // codigo_transaccion (ver auditoría), renombrado para
+                    // ser consistente con el nombre que ya usan
+                    // registrar-pago y verificar-pago para este mismo dato
+                    // — no es el id crudo (enumerable) ni un dato nuevo.
+                    // 'comprobante' (info interna/contable) sigue sin
+                    // exponerse al banco.
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
                     'codigo_consulta' => $transaccion->codigo_consulta,
                     // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente).
                     'registro_historico' => is_null($transaccion->codigo_consulta),
-                    'referencia' => $transaccion->referencia_externa,
+                    // 'referencia_externa'/'entidad_recaudadora' (antes
+                    // 'referencia'/'entidad', ver auditoría de nombres):
+                    // mismo dato, consistente con los nombres que ya usan
+                    // registrar-pago y verificar-pago — este sub-objeto era
+                    // el único lugar donde el renombre nunca se completó.
+                    'referencia_externa' => $transaccion->referencia_externa,
                     'fecha_pago' => $transaccion->fecha_pago?->format('Y-m-d H:i:s'),
-                    'entidad' => $transaccion->nombreEntidad(),
+                    'entidad_recaudadora' => $transaccion->nombreEntidad(),
                 ];
             }
 
@@ -1083,8 +1161,8 @@ class SriVehiculoService
             'todos_pagados' => $aniosPendientes->isEmpty(),
             'totales_pendientes' => [
                 'total_rodaje' => round($aniosPendientes->sum('rodaje'), 2),
-                'total_mora' => round($aniosPendientes->sum('mora'), 2),
-                'total_a_pagar' => round($aniosPendientes->sum('valor'), 2),
+                'total_mora' => round($aniosPendientes->sum('monto_mora'), 2),
+                'total_a_pagar' => round($aniosPendientes->sum('monto_total'), 2),
             ],
         ];
     }

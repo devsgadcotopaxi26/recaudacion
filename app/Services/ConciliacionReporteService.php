@@ -105,6 +105,7 @@ class ConciliacionReporteService
         $pagados = $pagos->where('estado', 'pagado');
         $pendientes = $pagos->where('estado', 'pendiente');
         $fallidos = $pagos->where('estado', 'fallido');
+        $reversados = $pagos->where('estado', 'reversado');
 
         return [
             'total_transacciones' => $pagos->count(),
@@ -119,6 +120,10 @@ class ConciliacionReporteService
             'fallidos' => [
                 'cantidad' => $fallidos->count(),
                 'monto_total' => round($fallidos->sum('monto_total'), 2),
+            ],
+            'reversados' => [
+                'cantidad' => $reversados->count(),
+                'monto_total' => round($reversados->sum('monto_total'), 2),
             ],
         ];
     }
@@ -141,6 +146,7 @@ class ConciliacionReporteService
                 'monto_total_pagado' => round($pagadosEntidad->sum('monto_total'), 2),
                 'pendientes' => $pagosPorEntidad->where('estado', 'pendiente')->count(),
                 'fallidos' => $pagosPorEntidad->where('estado', 'fallido')->count(),
+                'reversados' => $pagosPorEntidad->where('estado', 'reversado')->count(),
             ];
         })->values();
     }

@@ -57,6 +57,7 @@
                 <option value="pendiente">Pendiente</option>
                 <option value="fallido">Fallido</option>
                 <option value="expirado">Expirado</option>
+                <option value="reversado">Anulado</option>
               </select>
             </div>
             <div>
@@ -190,6 +191,13 @@
             </p>
             <p class="text-2xl font-bold">${{ formatMoney(resultado.resumen_general.fallidos.monto_total) }}</p>
             <p class="text-red-100 text-xs mt-2">{{ resultado.resumen_general.fallidos.cantidad }} registro(s)</p>
+          </div>
+          <div class="bg-gradient-to-br from-purple-600 to-violet-600 rounded-2xl p-6 text-white shadow-lg">
+            <p class="text-purple-100 text-xs font-medium uppercase tracking-wider mb-1">
+              Pagos Anulados
+            </p>
+            <p class="text-2xl font-bold">${{ formatMoney(resultado.resumen_general.reversados.monto_total) }}</p>
+            <p class="text-purple-100 text-xs mt-2">{{ resultado.resumen_general.reversados.cantidad }} registro(s)</p>
           </div>
         </div>
 
@@ -526,6 +534,7 @@ const estadoEtiqueta = (estado) =>
     pendiente: "Pendiente",
     fallido: "Fallido",
     expirado: "Expirado",
+    reversado: "Anulado",
   })[estado] ?? estado;
 
 const estadoClase = (estado) =>
@@ -534,5 +543,6 @@ const estadoClase = (estado) =>
     pendiente: "bg-amber-100 text-amber-700",
     fallido: "bg-red-100 text-red-700",
     expirado: "bg-gray-200 text-gray-600",
+    reversado: "bg-purple-100 text-purple-700",
   })[estado] ?? "bg-gray-100 text-gray-700";
 </script>

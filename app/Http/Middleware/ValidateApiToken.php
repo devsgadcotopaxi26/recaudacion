@@ -79,6 +79,7 @@ class ValidateApiToken
             return response()->json([
                 'success' => false,
                 'message' => 'IP no autorizada para este token',
+                'error_code' => 'IP_NO_AUTORIZADA',
             ], 403);
         }
 

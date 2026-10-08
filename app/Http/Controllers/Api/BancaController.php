@@ -105,6 +105,24 @@ class BancaController extends Controller
                 ),
             ], 200);
 
+        } catch (\App\Exceptions\SriConsultaIncompletaException $e) {
+            // El SRI entregó datos base y rubros válidos, pero no pudo
+            // completar el desglose por componente ni siquiera tras
+            // reintentar (ver SriVehiculoService) — distinto de una caída
+            // total del SRI (ese caso sigue cayendo en el catch genérico de
+            // abajo, con su propio mensaje). Nunca se sirve un desglose
+            // colapsado/incompleto como si fuera 200 OK.
+            Log::error('API: SRI no pudo entregar el desglose completo de la deuda', [
+                'placa' => $placa,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'error_code' => 'SRI_CONSULTA_INCOMPLETA',
+            ], $e->getCode() ?: 502);
+
         } catch (\Throwable $e) {
             try {
                 Log::error('API: Error al consultar SRI', [
@@ -141,7 +159,7 @@ class BancaController extends Controller
 
     /**
      * Registrar un pago realizado por entidad bancaria
-     * 
+     *
      * POST /api/v1/registrar-pago
      */
     public function registrarPago(Request $request)
@@ -149,6 +167,12 @@ class BancaController extends Controller
         // Validar request
         $validator = Validator::make($request->all(), [
             'placa' => 'required|string|max:10',
+            // PURAMENTE INFORMATIVO (ver auditoría de negocio): solo se usa
+            // más abajo para un chequeo temprano de "¿ya pagó este año
+            // puntual?" (devuelve pago_existente si aplica). NUNCA debe
+            // volver a decidir qué años entran en $aniosAPagar / monto a
+            // cobrar — el pago siempre es consolidado, todos los años
+            // pendientes en una sola transacción, sin excepción.
             'anio_fiscal' => 'nullable|integer|min:2020|max:2030',
             'monto' => 'required|numeric|min:0.01',
             'codigo_consulta' => 'required|string|max:30',
@@ -170,6 +194,7 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Datos inválidos',
+                'error_code' => 'DATOS_INVALIDOS',
                 'errors' => $validator->errors()
             ], 400);
         }
@@ -192,6 +217,7 @@ class BancaController extends Controller
                     return response()->json([
                         'success' => false,
                         'message' => "El vehículo ya tiene el impuesto pagado para el año {$anioFiscal}",
+                        'error_code' => 'ANIO_YA_PAGADO',
                         'pago_existente' => [
                             'codigo_consulta' => $transaccionExistente->codigo_consulta,
                             // true = pago anterior a la exigencia de codigo_consulta (sin código legítimamente,
@@ -224,6 +250,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Código de consulta no encontrado. Primero debe consultar la deuda.',
+                    'error_code' => 'CODIGO_CONSULTA_NO_ENCONTRADO',
                 ], 400);
             }
 
@@ -231,6 +258,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Este código de consulta ya fue utilizado para registrar un pago.',
+                    'error_code' => 'CODIGO_CONSULTA_YA_USADO',
                 ], 400);
             }
 
@@ -239,6 +267,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'El código de consulta expiró. Realice una nueva consulta de deuda.',
+                    'error_code' => 'CODIGO_CONSULTA_EXPIRADO',
                 ], 400);
             }
 
@@ -246,6 +275,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'La placa no coincide con la consulta original.',
+                    'error_code' => 'PLACA_NO_COINCIDE',
                 ], 400);
             }
 
@@ -261,33 +291,27 @@ class BancaController extends Controller
 
             // Filtrar solo años pendientes del desglose
             $aniosPendientes = collect($datos['desglose_anual'])->filter(function ($anio) use ($pagosExistentes) {
-                return !in_array($anio['anio'], $pagosExistentes);
+                return !in_array($anio['anio_fiscal'], $pagosExistentes);
             })->values();
 
             if ($aniosPendientes->isEmpty()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No hay años pendientes de pago para esta placa.',
+                    'error_code' => 'SIN_ANIOS_PENDIENTES',
                 ], 400);
             }
 
-            $totalPendiente = round($aniosPendientes->sum('valor'), 2);
-
-            // Determinar si paga un año específico o todos los pendientes
-            $aniosAPagar = collect();
-            if ($aniosPendientes->count() === 1) {
-                // Solo un año pendiente, el monto debe coincidir
-                $aniosAPagar = $aniosPendientes;
-                $montoEsperado = $totalPendiente;
-            } elseif ($anioFiscal && $aniosPendientes->where('anio', $anioFiscal)->isNotEmpty()) {
-                // Paga un año específico
-                $aniosAPagar = $aniosPendientes->where('anio', $anioFiscal)->values();
-                $montoEsperado = round($aniosAPagar->sum('valor'), 2);
-            } else {
-                // Paga todos los pendientes
-                $aniosAPagar = $aniosPendientes;
-                $montoEsperado = $totalPendiente;
-            }
+            // Regla de negocio NO NEGOCIABLE: un pago siempre cubre el TOTAL
+            // de la deuda pendiente (todos los años, del más antiguo al
+            // actual) en una sola operación — nunca un solo año seleccionado
+            // a propósito, aunque haya varios pendientes. anio_fiscal (abajo)
+            // es puramente informativo para el chequeo de duplicado temprano;
+            // nunca debe influir en qué se cobra aquí (ver auditoría: antes
+            // había una rama que sí dejaba elegir un año específico vía
+            // anio_fiscal, dejando el resto sin cobrar — eliminada).
+            $aniosAPagar = $aniosPendientes;
+            $montoEsperado = round($aniosPendientes->sum('monto_total'), 2);
 
             // Verificar que el monto sea correcto (tolerancia de $1.00)
             $diferencia = abs($monto - $montoEsperado);
@@ -296,11 +320,16 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'El monto enviado no coincide con el total a pagar',
+                    'error_code' => 'MONTO_NO_COINCIDE',
                     'monto_enviado' => round($monto, 2),
                     'monto_esperado' => round($montoEsperado, 2),
                     'diferencia' => round($diferencia, 2),
+                    // Claves de salida ('anio'/'valor') sin cambios a
+                    // propósito — este error no está en el alcance de la
+                    // auditoría de nombres, solo se actualizó de dónde se
+                    // leen (desglose_anual ahora usa anio_fiscal/monto_total).
                     'detalle_pendiente' => $aniosAPagar->map(function ($a) {
-                        return ['anio' => $a['anio'], 'valor' => $a['valor']];
+                        return ['anio' => $a['anio_fiscal'], 'valor' => $a['monto_total']];
                     }),
                 ], 400);
             }
@@ -356,10 +385,10 @@ class BancaController extends Controller
                     $detalleCreado = $transaccion->detalles()->create([
                         'placa' => $placa,
                         'estado' => 'pagado',
-                        'anio_fiscal' => $anioPago['anio'],
+                        'anio_fiscal' => $anioPago['anio_fiscal'],
                         'monto_impuesto' => $anioPago['rodaje'] ?? 0,
-                        'monto_mora' => $anioPago['mora'] ?? 0,
-                        'monto_total' => $anioPago['valor'],
+                        'monto_mora' => $anioPago['monto_mora'] ?? 0,
+                        'monto_total' => $anioPago['monto_total'],
                     ]);
 
                     // Suma del valor REALMENTE persistido (no del array
@@ -370,8 +399,8 @@ class BancaController extends Controller
                     $sumaDetalle += (float) $detalleCreado->monto_total;
 
                     $pagosCreados[] = [
-                        'anio_fiscal' => $anioPago['anio'],
-                        'monto' => round($anioPago['valor'], 2),
+                        'anio_fiscal' => $anioPago['anio_fiscal'],
+                        'monto' => round($anioPago['monto_total'], 2),
                     ];
                 }
 
@@ -506,6 +535,7 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Debe enviar codigo_transaccion o referencia_externa',
+                'error_code' => 'CRITERIO_BUSQUEDA_REQUERIDO',
             ], 400);
         }
 
@@ -513,6 +543,7 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Datos inválidos',
+                'error_code' => 'DATOS_INVALIDOS',
                 'errors' => $validator->errors()
             ], 400);
         }
@@ -552,6 +583,7 @@ class BancaController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'No se encontró ningún pago con los datos proporcionados',
+                    'error_code' => 'PAGO_NO_ENCONTRADO',
                 ], 404);
             }
 
@@ -615,6 +647,20 @@ class BancaController extends Controller
                     // campo.
                     'fecha_registro' => $transaccion->created_at->format('Y-m-d H:i:s'),
                     'entidad_recaudadora' => $transaccion->nombreEntidad(),
+                    // Siempre presente (null, no ausente) para que el banco
+                    // integrador no tenga que chequear si la clave existe:
+                    // null = pago vigente, objeto poblado = fue anulado.
+                    // Claves 'fecha_reversion'/'motivo_reversion' (antes
+                    // 'revertido_en'/'revertido_motivo', ver auditoría de
+                    // nombres): consistentes con el patrón 'fecha_*' que ya
+                    // usa el resto de la API (fecha_pago, fecha_registro) y
+                    // con 'motivo_reversion' agregado en revertir-pago —
+                    // cambio seguro, el campo 'reversion' es de hoy, nadie
+                    // lo consume todavía.
+                    'reversion' => $transaccion->estado === 'reversado' ? [
+                        'fecha_reversion' => $transaccion->revertido_en?->format('Y-m-d H:i:s'),
+                        'motivo_reversion' => $transaccion->revertido_motivo,
+                    ] : null,
                 ]
             ], 200);
 
@@ -626,6 +672,114 @@ class BancaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error al consultar el pago',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
+            ], 500);
+        }
+    }
+
+    /**
+     * Revertir un pago bancario ya registrado (placa incorrecta, monto
+     * incorrecto, duplicado, etc.). Siempre total sobre la transacción
+     * completa (todos los años que cubrió ese codigo_transaccion) — no se
+     * admite revertir solo uno de los años de un pago multi-año. El
+     * codigo_consulta original NO se reutiliza: si el banco quiere volver
+     * a pagar, debe hacer una consulta nueva (consulta_bancarias no se
+     * toca aquí).
+     *
+     * POST /api/v1/revertir-pago
+     */
+    public function revertirPago(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'codigo_transaccion' => 'required|string|max:32',
+            'motivo' => 'required|string|min:10',
+        ], [
+            'codigo_transaccion.required' => 'El código de transacción es obligatorio',
+            'motivo.required' => 'El motivo de la reversión es obligatorio',
+            'motivo.min' => 'El motivo debe tener al menos 10 caracteres',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos',
+                'error_code' => 'DATOS_INVALIDOS',
+                'errors' => $validator->errors()
+            ], 400);
+        }
+
+        try {
+            // Acotado a api_token_id === $request->api_token_id (inyectado
+            // por ValidateApiToken desde el token autenticado) — mismo
+            // patrón que verificarPago(): un banco nunca puede ver ni
+            // revertir transacciones de otra entidad, ni siquiera para
+            // enterarse de que existen.
+            $transaccion = TransaccionPago::where('codigo_transaccion', $request->codigo_transaccion)
+                ->where('api_token_id', $request->api_token_id)
+                ->first();
+
+            if (!$transaccion) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No se encontró ningún pago con los datos proporcionados',
+                    'error_code' => 'PAGO_NO_ENCONTRADO',
+                ], 404);
+            }
+
+            if ($transaccion->estado !== 'pagado') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Este pago no puede revertirse porque su estado actual es "' . $transaccion->estado . '"',
+                    'error_code' => 'PAGO_YA_ANULADO',
+                ], 400);
+            }
+
+            if (!$transaccion->puedeRevertirse()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El pago ya no puede revertirse: pasaron más de 24 horas desde su registro',
+                    'error_code' => 'FUERA_DE_VENTANA_REVERSION',
+                    // absolute=true explícito — mismo motivo que
+                    // TransaccionPago::puedeRevertirse() (Carbon 3 cambió
+                    // el default y devuelve negativo si no se especifica).
+                    'horas_transcurridas' => now()->diffInHours($transaccion->created_at, true),
+                ], 400);
+            }
+
+            $transaccion->revertir($request->api_token_id, $request->motivo);
+
+            Log::info('API: Pago revertido', [
+                'transaccion_pago_id' => $transaccion->id,
+                'codigo_transaccion' => $transaccion->codigo_transaccion,
+                'entidad' => $request->entidad_nombre,
+                'api_token_id' => $request->api_token_id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pago revertido correctamente',
+                'data' => [
+                    'codigo_transaccion' => $transaccion->codigo_transaccion,
+                    'estado' => $transaccion->estado,
+                    'fecha_reversion' => $transaccion->revertido_en?->format('Y-m-d H:i:s'),
+                    // Agregado (auditoría de nombres): antes la respuesta
+                    // confirmaba la reversión pero no devolvía el motivo
+                    // que el banco acaba de enviar — tenía que llamar
+                    // aparte a verificar-pago para verlo reflejado.
+                    'motivo_reversion' => $transaccion->revertido_motivo,
+                    'placa' => $transaccion->placa,
+                    'monto_revertido' => round((float) $transaccion->monto_total, 2),
+                ],
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('API: Error al revertir pago', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al revertir el pago',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Error interno',
             ], 500);
         }
