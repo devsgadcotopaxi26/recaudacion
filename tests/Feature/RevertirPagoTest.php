@@ -242,6 +242,54 @@ class RevertirPagoTest extends TestCase
         $response->assertJsonPath('error_code', 'DATOS_INVALIDOS');
     }
 
+    public function test_acepta_motivo_reversion_como_alias_de_motivo(): void
+    {
+        $bancoA = $this->crearApiToken('banco_a');
+        $transaccion = $this->crearTransaccionDe($bancoA);
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
+            ->postJson('/api/v1/revertir-pago', [
+                'codigo_transaccion' => $transaccion->codigo_transaccion,
+                'motivo_reversion' => 'Cliente solicitó anulación en ventanilla',
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.motivo_reversion', 'Cliente solicitó anulación en ventanilla');
+        $this->assertSame('Cliente solicitó anulación en ventanilla', $transaccion->fresh()->revertido_motivo);
+    }
+
+    public function test_si_llegan_ambas_claves_prevalece_motivo(): void
+    {
+        $bancoA = $this->crearApiToken('banco_a');
+        $transaccion = $this->crearTransaccionDe($bancoA);
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
+            ->postJson('/api/v1/revertir-pago', [
+                'codigo_transaccion' => $transaccion->codigo_transaccion,
+                'motivo' => 'Motivo enviado en la clave motivo',
+                'motivo_reversion' => 'Motivo enviado en la clave alternativa',
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.motivo_reversion', 'Motivo enviado en la clave motivo');
+    }
+
+    public function test_rechaza_si_motivo_reversion_es_muy_corto(): void
+    {
+        $bancoA = $this->crearApiToken('banco_a');
+        $transaccion = $this->crearTransaccionDe($bancoA);
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer token_estatico_banco_a'])
+            ->postJson('/api/v1/revertir-pago', [
+                'codigo_transaccion' => $transaccion->codigo_transaccion,
+                'motivo_reversion' => 'corto',
+            ]);
+
+        $response->assertStatus(400);
+        $response->assertJsonValidationErrors(['motivo']);
+        $this->assertSame('pagado', $transaccion->fresh()->estado);
+    }
+
     public function test_rechaza_si_el_motivo_es_muy_corto(): void
     {
         $bancoA = $this->crearApiToken('banco_a');

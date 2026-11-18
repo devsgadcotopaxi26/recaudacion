@@ -695,12 +695,19 @@ class BancaController extends Controller
      */
     public function revertirPago(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        // Se acepta 'motivo' o 'motivo_reversion' (mismo nombre que la
+        // respuesta). Si llegan ambas, prevalece 'motivo'. Los errores se
+        // reportan siempre bajo la clave 'motivo'.
+        $motivo = $request->filled('motivo')
+            ? $request->input('motivo')
+            : $request->input('motivo_reversion');
+
+        $validator = Validator::make(array_merge($request->all(), ['motivo' => $motivo]), [
             'codigo_transaccion' => 'required|string|max:32',
             'motivo' => 'required|string|min:10',
         ], [
             'codigo_transaccion.required' => 'El código de transacción es obligatorio',
-            'motivo.required' => 'El motivo de la reversión es obligatorio',
+            'motivo.required' => 'El motivo de la reversión es obligatorio (envíe "motivo" o "motivo_reversion")',
             'motivo.min' => 'El motivo debe tener al menos 10 caracteres',
         ]);
 
@@ -751,7 +758,7 @@ class BancaController extends Controller
                 ], 400);
             }
 
-            $transaccion->revertir($request->api_token_id, $request->motivo);
+            $transaccion->revertir($request->api_token_id, $motivo);
 
             Log::info('API: Pago revertido', [
                 'transaccion_pago_id' => $transaccion->id,
