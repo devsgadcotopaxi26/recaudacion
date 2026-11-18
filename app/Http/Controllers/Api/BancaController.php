@@ -76,7 +76,12 @@ class BancaController extends Controller
                         'user_agent'     => request()->userAgent(),
                     ]);
                 } catch (\Exception $e) {
-                    Log::warning('API: No se pudo registrar el log de consulta', ['error' => $e->getMessage()]);
+                    // error (no warning): con LOG_LEVEL=error en producción un
+                    // warning se descarta y el fallo del insert pasa inadvertido.
+                    Log::error('API: No se pudo registrar el log de consulta', [
+                        'placa' => $placa,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
             } else {
                 Log::info('API: Registro de auditoría omitido (resultado incoherente: deuda con $0)', [
