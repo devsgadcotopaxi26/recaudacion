@@ -22,4 +22,9 @@ export default defineConfig({
       "@": "/resources/js",
     },
   },
+  // Solo para `npm run dev`: IPv4 explícito. Por defecto Vite usa [::1] en
+  // Windows y la CSP (SecurityHeaders) no admite IPv6 literales como origen.
+  server: {
+    host: "127.0.0.1",
+  },
 });
