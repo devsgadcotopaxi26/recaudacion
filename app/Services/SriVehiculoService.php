@@ -935,6 +935,7 @@ class SriVehiculoService
                         $detalle['desde_pago'] = true;
                         $detalle['total'] = floatval($ultimoPago['monto'] ?? 0);
                         $detalle['anio_pago'] = intval(substr($ultimoPago['fechaDePago'] ?? date('Y'), 0, 4));
+                        $detalle['fecha_pago_sri'] = $ultimoPago['fechaDePago'] ?? null;
                         $detalle['rubros_raw'] = $detallesPago;
                         $detalle['metodo_utilizado'] = 'historial';
                     }
@@ -981,6 +982,17 @@ class SriVehiculoService
                     // 3) Limitación conocida: si tampoco hay esa señal (SRI no la reportó,
                     //    valor 0), no queda ningún dato real para acotar el rango — se
                     //    calcula únicamente el año actual como candidato mínimo.
+                    //
+                    // Además, los años que cubrió el ÚLTIMO comprobante del SRI son
+                    // siempre candidatos si ese pago se hizo desde que el GADPC cobra el
+                    // rodaje con este sistema (config sri.inicio_cobro_rodaje). Caso
+                    // confirmado: XAI0194 pagó en 2026 la matrícula 2023-2026 en un solo
+                    // comprobante (último pago anterior: 2022). El SRI pasa a reportar
+                    // ultimoAnioPagado=2026 y la regla 2) daba por cubiertos 2023-2025,
+                    // aunque el rodaje de esos años nunca se pagó al GADPC — el SRI no
+                    // cobra rodaje provincial. Los años que sí tengan PagoDetalle local
+                    // los marca 'pagado' conciliarPagosLocales(), así que incluirlos aquí
+                    // no genera doble cobro.
                     $maxAnioPagadoLocal = PagoDetalle::where('placa', $placa)
                         ->where('estado', 'pagado')
                         ->max('anio_fiscal');
@@ -993,7 +1005,38 @@ class SriVehiculoService
                         $anioInicioCandidatos = $anioActualCalc;
                     }
 
-                    if ($anioInicioCandidatos > $anioActualCalc) {
+                    // Base de cada año = suma de TODOS sus componentes en el comprobante
+                    // (impuesto, tasas, recargos, intereses), igual que la rama 'deuda'.
+                    // Antes se aplicaba el total del comprobante completo a cada año, lo
+                    // que inflaba la base cuando un pago cubría varios años.
+                    $basePorAnio = [];
+                    foreach ($detalle['rubros_raw'] ?? [] as $item) {
+                        $anioItem = intval($item['anio'] ?? 0);
+                        if ($anioItem > 0) {
+                            $basePorAnio[$anioItem] = ($basePorAnio[$anioItem] ?? 0)
+                                + floatval(str_replace(',', '.', (string) ($item['valor'] ?? 0)));
+                        }
+                    }
+                    ksort($basePorAnio);
+                    // Años sin dato en el comprobante (p. ej. posteriores a él): se usa
+                    // la base del año más reciente del comprobante como estimación anual.
+                    $baseEstimada = $basePorAnio ? end($basePorAnio) : $valorMatricula;
+
+                    $aniosCandidatos = $anioInicioCandidatos <= $anioActualCalc
+                        ? range($anioInicioCandidatos, $anioActualCalc)
+                        : [];
+
+                    $fechaPagoSri = $detalle['fecha_pago_sri'] ?? null;
+                    $inicioCobro = config('sri.inicio_cobro_rodaje', '2026-01-01');
+                    if ($basePorAnio && $fechaPagoSri && substr($fechaPagoSri, 0, 10) >= $inicioCobro) {
+                        $aniosComprobante = array_filter(
+                            array_keys($basePorAnio),
+                            fn ($a) => $a <= $anioActualCalc && (!$maxAnioPagadoLocal || $a > $maxAnioPagadoLocal)
+                        );
+                        $aniosCandidatos = array_values(array_unique(array_merge($aniosComprobante, $aniosCandidatos)));
+                    }
+
+                    if (empty($aniosCandidatos)) {
                         // Ya cubierto (local o SRI) hasta el año actual: sin candidatos.
                         $desgloseResult = [
                             'desglose' => [],
@@ -1002,14 +1045,12 @@ class SriVehiculoService
                             'total_a_pagar' => 0,
                         ];
                     } else {
-                        // $valorMatricula es el monto del ÚLTIMO PAGO REAL conocido (ver
-                        // arriba). Limitación conocida: si ese pago cubrió más de un año en
-                        // un solo comprobante (caso confirmado: HBA2552, $240.22 por 2 años
-                        // en un solo pago), este valor se aplica completo a CADA año
-                        // candidato — no se prorratea automáticamente entre años.
                         $detallesRubroCandidatos = [];
-                        for ($anioCand = $anioInicioCandidatos; $anioCand <= $anioActualCalc; $anioCand++) {
-                            $detallesRubroCandidatos[] = ['anio' => $anioCand, 'valor' => $valorMatricula];
+                        foreach ($aniosCandidatos as $anioCand) {
+                            $detallesRubroCandidatos[] = [
+                                'anio' => $anioCand,
+                                'valor' => round($basePorAnio[$anioCand] ?? $baseEstimada, 2),
+                            ];
                         }
 
                         $detalleCandidatos = [
