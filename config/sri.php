@@ -27,6 +27,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inicio del cobro de rodaje por este sistema
+    |--------------------------------------------------------------------------
+    |
+    | Fecha (Y-m-d) desde la que el GADPC cobra el rodaje con este sistema.
+    | Si el último comprobante de matrícula del SRI se pagó en esta fecha o
+    | después, todos los años que cubrió se cobran como rodaje pendiente
+    | (salvo los que ya tengan pago local). Ver SriVehiculoService, rama
+    | 'historial'.
+    |
+    */
+
+    'inicio_cobro_rodaje' => env('SRI_INICIO_COBRO_RODAJE', '2026-01-01'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Caché
     |--------------------------------------------------------------------------
     |
